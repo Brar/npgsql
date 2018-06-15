@@ -551,6 +551,34 @@ namespace Npgsql.Tests
         }
 
         [Test]
+        public async Task ExecuteScalarGeneric()
+        {
+            using (var conn = await OpenConnectionAsync())
+            {
+                await conn.ExecuteNonQueryAsync("CREATE TEMP TABLE data (name TEXT)");
+                using (var command = new NpgsqlCommand("SELECT name FROM data", conn))
+                {
+                    await conn.ExecuteNonQueryAsync("INSERT INTO data (name) VALUES ('X')");
+                    Assert.That(command.ExecuteScalar<string>(), Is.EqualTo("X"));
+
+                    await conn.ExecuteNonQueryAsync(@"TRUNCATE data");
+                    await conn.ExecuteNonQueryAsync(@"INSERT INTO data (name) VALUES (NULL)");
+                    Assert.That(
+                        () => command.ExecuteScalar<string>(),
+                        Throws.InstanceOf<InvalidCastException>().With.Message.EqualTo("Column is null"));
+                }
+            }
+            using (var conn = await OpenConnectionAsync())
+            {
+                await conn.ExecuteNonQueryAsync("CREATE TEMP TABLE data (name TEXT)");
+                using (var command = new NpgsqlCommand("SELECT name FROM data", conn))
+                Assert.That(
+                    () => command.ExecuteScalar<string>(),
+                    Throws.InstanceOf<NpgsqlException>().With.Message.EqualTo("Empty result set"));
+            }
+        }
+
+        [Test]
         public async Task ExecuteNonQuery()
         {
             using (var conn = await OpenConnectionAsync())
