@@ -89,7 +89,7 @@ namespace Npgsql
         static NpgsqlConnectionStringBuilder()
         {
             var properties = typeof(NpgsqlConnectionStringBuilder)
-                .GetProperties()
+                .GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 .Where(p => p.GetCustomAttribute<NpgsqlConnectionStringPropertyAttribute>() != null)
                 .ToArray();
 
@@ -1171,6 +1171,19 @@ namespace Npgsql
         }
         bool _loadTableComposites;
 
+        [NpgsqlConnectionStringProperty]
+        [DisplayName("Replication Mode")]
+        internal ReplicationMode ReplicationMode
+        {
+            get => _replicationMode;
+            set
+            {
+                _replicationMode = value;
+                SetValue(nameof(ReplicationMode), value);
+            }
+        }
+        ReplicationMode _replicationMode;
+
         /// <summary>
         /// Set PostgreSQL configuration parameter default values for the connection.
         /// </summary>
@@ -1629,6 +1642,13 @@ namespace Npgsql
         /// Fail the connection if the server doesn't support SSL.
         /// </summary>
         Require,
+    }
+
+    enum ReplicationMode
+    {
+        Off,
+        Physical,
+        Logical
     }
 
     #endregion
