@@ -131,9 +131,13 @@ namespace Npgsql.Replication
                 .Append(walLocation);
 
             if (options != null)
+            {
                 sb
-                    .Append(' ')
-                    .Append(string.Join(", ", options.Select(kv => kv.Value is null ? kv.Key : kv.Key + " " + kv.Value)));
+                    .Append(" (")
+                    .Append(string.Join(", ", options
+                        .Select(kv => kv.Value is null ? $"\"{kv.Key}\"" : $"\"{kv.Key}\" '{kv.Value}'")))
+                    .Append(")");
+            }
 
             var connector = Connection.Connector!;
             await connector.WriteQuery(sb.ToString(), true);
