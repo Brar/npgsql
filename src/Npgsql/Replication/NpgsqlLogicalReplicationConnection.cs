@@ -123,7 +123,7 @@ namespace Npgsql.Replication
         /// Options to be passed to the slot's logical decoding plugin.
         /// </param>
         [PublicAPI]
-        public async Task StartReplication(string slotName, string? walLocation = null, Dictionary<string, object>? options = null)
+        public async IAsyncEnumerable<XLogData> StartReplication(string slotName, string? walLocation = null, Dictionary<string, object>? options = null)
         {
             var sb = new StringBuilder("START_REPLICATION SLOT ")
                 .Append(slotName)
@@ -148,7 +148,7 @@ namespace Npgsql.Replication
             {
             case BackendMessageCode.CopyBothResponse:
                 State = ReplicationConnectionState.Streaming;
-                return;
+                break;
             case BackendMessageCode.CompletedResponse:
                 // TODO: This can happen when the client requests streaming at exactly the end of an old timeline.
                 // TODO: Figure out how to communicate these different states to the user
@@ -156,40 +156,31 @@ namespace Npgsql.Replication
             default:
                 throw Connection.Connector!.UnexpectedMessageReceived(msg.Code);
             }
-        }
 
-        /// <summary>
-        ///
-        /// </summary>
-        /// <returns></returns>
-        /// <exception cref="Exception"></exception>
-        [PublicAPI]
-        public async ValueTask<XLogData?> GetNextMessage()
-        {
-            var connector = Connection.Connector!;
-            try
+            while (true)
             {
-                while (true)
+                try
                 {
-                    var msg = await connector.ReadMessage(true);
-                    switch (msg.Code)
-                    {
-                    case BackendMessageCode.CopyData:
-                        var copyData = (CopyDataMessage)msg;
-                        await connector.ReadBuffer.Ensure(copyData.Length, true);
-                        var xLogData = ParseCopyData((CopyDataMessage)msg);
-                        if (xLogData.HasValue)
-                            return xLogData.Value;
-                        continue;
-                    default:
-                        throw connector.UnexpectedMessageReceived(msg.Code);
-                    }
+                    msg = await connector.ReadMessage(true);
                 }
-            }
-            catch (PostgresException e) when (e.SqlState == PostgresErrorCodes.QueryCanceled)
-            {
-                State = ReplicationConnectionState.Idle;
-                return null;
+                catch (PostgresException e) when (e.SqlState == PostgresErrorCodes.QueryCanceled)
+                {
+                    State = ReplicationConnectionState.Idle;
+                    yield break;
+                }
+
+                switch (msg.Code)
+                {
+                case BackendMessageCode.CopyData:
+                    var copyData = (CopyDataMessage)msg;
+                    await connector.ReadBuffer.Ensure(copyData.Length, true);
+                    var xLogData = ParseCopyData((CopyDataMessage)msg);
+                    if (xLogData != null)
+                        yield return xLogData.Value;
+                    continue;
+                default:
+                    throw connector.UnexpectedMessageReceived(msg.Code);
+                }
             }
         }
 

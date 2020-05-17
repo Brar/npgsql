@@ -1,0 +1,2 @@
+
+* Backend messages: should be sealed? Publicly settable for mocking?
