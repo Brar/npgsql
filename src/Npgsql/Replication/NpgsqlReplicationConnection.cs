@@ -13,7 +13,7 @@ namespace Npgsql.Replication
     /// <summary>
     ///
     /// </summary>
-    public abstract class NpgsqlReplicationConnection : IDisposable
+    public abstract class NpgsqlReplicationConnection : IDisposable, IAsyncDisposable
     {
         #region Fields
 
@@ -236,6 +236,19 @@ namespace Npgsql.Replication
                 return;
             Connection?.Dispose();
             Connection = null!;
+            State = ReplicationConnectionState.Disposed;
+        }
+
+        /// <inheritdoc />
+        public async ValueTask DisposeAsync()
+        {
+            if (State == ReplicationConnectionState.Disposed)
+                return;
+            if (Connection != null)
+            {
+                await Connection.DisposeAsync();
+                Connection = null!;
+            }
             State = ReplicationConnectionState.Disposed;
         }
 
