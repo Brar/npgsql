@@ -6,6 +6,7 @@ namespace Npgsql.Replication
 {
     enum BackendReplicationMessageCode : byte
     {
+        Invalid = 0,
         Begin = (byte)'B',
         Commit = (byte)'C',
         Origin = (byte)'O',
@@ -17,8 +18,23 @@ namespace Npgsql.Replication
         Truncate = (byte)'T'
     }
 
-    // TODO: Base class or interface? We already have IBackendMessage...
-    public class OutputReplicationMessage {}
+    public class OutputReplicationMessage
+    {
+        /// <summary>
+        /// The starting point of the WAL data in this message.
+        /// </summary>
+        public ulong WalStart { get; set; }
+
+        /// <summary>
+        /// The current end of WAL on the server.
+        /// </summary>
+        public ulong WalEnd { get; set; }
+
+        /// <summary>
+        /// The server's system clock at the time of transmission, as microseconds since midnight on 2000-01-01.
+        /// </summary>
+        public ulong ServerClock { get; set; }
+    }
 
     public sealed class BeginMessage : OutputReplicationMessage
     {

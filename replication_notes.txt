@@ -1,2 +1,9 @@
 
 * Backend messages: should be sealed? Publicly settable for mocking?
+* Consider caching the replication message instances - but we're currently an extension method. We could move the method to the connection itself, but that would prevent external "plugins" (e.g. protobuf/json).
+* Bug in ColumnStream.Read - buffer.Length check should be looking at _len
+* Should pgoutput be an extension method like other theoretical plugins? Maybe, but it needs internal access to connection/connector/readbuffer.
+
+* Currently we read directly from the buffer, from underneath column stream - when the latter is disposed, it thinks nothing was read and skips in the buffer, so we lose protocol sync. Either:
+    1. Tell the column stream that we're done (hack) so it doesn't skip, or
+    2. Build NpgsqlReadBuffer over the XLogData stream, without a connector.
