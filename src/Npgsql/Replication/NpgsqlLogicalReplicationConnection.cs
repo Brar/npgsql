@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -8,6 +10,7 @@ using JetBrains.Annotations;
 using Npgsql.BackendMessages;
 using Npgsql.Logging;
 using static Npgsql.Util.Statics;
+#pragma warning disable 1591
 
 namespace Npgsql.Replication
 {
@@ -41,10 +44,12 @@ namespace Npgsql.Replication
         public Task OpenAsync(CancellationToken cancellationToken = default)
         {
             using (NoSynchronizationContextScope.Enter())
+            {
                 return OpenAsync(new NpgsqlConnectionStringBuilder(ConnectionString)
                 {
                     ReplicationMode = ReplicationMode.Logical
                 }, cancellationToken);
+            }
         }
 
         #endregion Open
@@ -157,6 +162,10 @@ namespace Npgsql.Replication
                 throw Connection.Connector!.UnexpectedMessageReceived(msg.Code);
             }
 
+            // TODO: We can't dispose this, because it would skip the buffer - it's unaware that we've already
+            // consumed everything yby going directly to the buffer
+            /*using*/ var columnStream = new NpgsqlReadBuffer.ColumnStream(connector.ReadBuffer);
+
             while (true)
             {
                 try
@@ -182,47 +191,119 @@ namespace Npgsql.Replication
                     throw connector.UnexpectedMessageReceived(msg.Code);
                 }
             }
-        }
 
-        XLogData? ParseCopyData(CopyDataMessage copyDataMessage)
-        {
-            // TODO: Not all data is in the buffer
-            var buf = Connection.Connector!.ReadBuffer;
-            var len = copyDataMessage.Length;
-            var code = (char)buf.ReadByte();
-            switch (code)
+            XLogData? ParseCopyData(CopyDataMessage copyDataMessage)
             {
-            case 'w': // XLogData
-            {
-                var walStart = buf.ReadInt64();
-                var walEnd = buf.ReadInt64();
-                var serverClock = buf.ReadInt64();
-                var dataLen = len - 1 - 8 - 8 - 8;
-                var data  = new XLogData(walStart, walEnd, serverClock,
-                    new ReadOnlyMemory<byte>(buf.Buffer, buf.ReadPosition, dataLen));
-                buf.ReadPosition += dataLen;
-                return data;
-                //var data = new byte[len - 1 - 8 - 8 - 8];
-                //buf.ReadBytes(data);
-                //return new XLogData(walStart, walEnd, serverClock, data);
-            }
+                // TODO: Not all data is in the buffer
+                var buf = Connection.Connector!.ReadBuffer;
+                var len = copyDataMessage.Length;
+                var code = (char)buf.ReadByte();
+                switch (code)
+                {
+                case 'w': // XLogData
+                {
+                    var walStart = buf.ReadUInt64();
+                    var walEnd = buf.ReadUInt64();
+                    var serverClock = buf.ReadUInt64();
+                    var dataLen = len - 1 - 8 - 8 - 8;
+                    columnStream.Init(dataLen, canSeek: false);
+                    var data = new XLogData(walStart, walEnd, serverClock, columnStream);
+                    // var data  = new XLogData(walStart, walEnd, serverClock, new ReadOnlyMemory<byte>(buf.Buffer, buf.ReadPosition, dataLen));
+                    // buf.ReadPosition += dataLen;
+                    return data;
+                    //var data = new byte[len - 1 - 8 - 8 - 8];
+                    //buf.ReadBytes(data);
+                    //return new XLogData(walStart, walEnd, serverClock, data);
+                }
 
-            case 'k': // Primary keepalive message
-            {
-                buf.Ensure(sizeof(long) + sizeof(long) + sizeof(byte));
-                var walEnd = buf.ReadInt64();
-                var serverClock = buf.ReadInt64();
-                var replyImmediately = buf.ReadByte() == 1;
-                return null;
-            }
+                case 'k': // Primary keepalive message
+                {
+                    buf.Ensure(sizeof(long) + sizeof(long) + sizeof(byte));
+                    var walEnd = buf.ReadInt64();
+                    var serverClock = buf.ReadInt64();
+                    var replyImmediately = buf.ReadByte() == 1;
+                    return null;
+                }
 
-            default:
-                Connection.Connector.Break();
-                throw new NpgsqlException($"Unknown replication message code '{code}'");
+                default:
+                    Connection.Connector.Break();
+                    throw new NpgsqlException($"Unknown replication message code '{code}'");
+                }
             }
         }
 
         #endregion Replication commands
+
+        #region PG output plugin
+
+        public Task<NpgsqlLogicalReplicationSlotInfo> CreateOutputReplicationSlot(
+            string slotName,
+            bool isTemporary = false,
+            SlotSnapshotInitMode slotSnapshotInitMode = SlotSnapshotInitMode.Export)
+            => CreateReplicationSlot(slotName, "pgoutput", isTemporary, slotSnapshotInitMode);
+
+        public async IAsyncEnumerable<OutputReplicationMessage> StartOutputReplication(
+            string slotName,
+            string? walLocation, // TODO: Should be defaultable, maybe fluent API, maybe not
+            params string[] publicationNames)  // TODO: Does the user need to specify at least one? If so, possibly force at least one publication name via a separate param
+        {
+            var buf = Connection.Connector!.ReadBuffer;
+
+            var options = new Dictionary<string, object>
+            {
+                { "proto_version", "1" },
+                { "publication_names", string.Join(",", publicationNames.Select(pn => $"\"{pn}\"")) }
+            };
+
+            await foreach (var xLogData in StartReplication(slotName, walLocation, options))
+            {
+                // Note that we bypass xLogData.Stream and access the connector's read buffer directly. This is
+                // an ugly hack, but allows us to use all the I/O methods and buffering that are already implemented.
+                await buf.EnsureAsync(1);
+                var messageCode = (BackendReplicationMessageCode)buf.ReadByte();
+                switch (messageCode)
+                {
+                case BackendReplicationMessageCode.Begin:
+                    await buf.EnsureAsync(8 + 8 + 4);
+                    // yield return new BeginMessage
+                    var x = new BeginMessage
+                    {
+                        WalStart = xLogData.WalStart,
+                        WalEnd = xLogData.WalEnd,
+                        ServerClock = xLogData.ServerClock,
+
+                        TransactionFinalLsn = buf.ReadUInt64(),
+                        TransactionCommitTimestamp = buf.ReadUInt64(),
+                        TransactionXid = buf.ReadUInt32()
+                    };
+                    continue;
+
+                case BackendReplicationMessageCode.Commit:
+                    throw new NotImplementedException();
+                case BackendReplicationMessageCode.Origin:
+                    throw new NotImplementedException();
+                case BackendReplicationMessageCode.Relation:
+                    throw new NotImplementedException();
+                case BackendReplicationMessageCode.Type:
+                    throw new NotImplementedException();
+                case BackendReplicationMessageCode.Insert:
+                    throw new NotImplementedException();
+                case BackendReplicationMessageCode.Update:
+                    throw new NotImplementedException();
+                case BackendReplicationMessageCode.Delete:
+                    throw new NotImplementedException();
+                case BackendReplicationMessageCode.Truncate:
+                    throw new NotImplementedException();
+                default:
+                    throw new ArgumentOutOfRangeException();
+                }
+            }
+
+            yield return null!;
+            throw new NotImplementedException();
+        }
+
+        #endregion PG output plugin
 
         #region Support types
 
@@ -300,10 +381,10 @@ namespace Npgsql.Replication
         public readonly struct XLogData
         {
             internal XLogData(
-                long walStart,
-                long walEnd,
-                long serverClock,
-                ReadOnlyMemory<byte> data)
+                ulong walStart,
+                ulong walEnd,
+                ulong serverClock,
+                Stream data)
             {
                 WalStart = walStart;
                 WalEnd = walEnd;
@@ -314,19 +395,18 @@ namespace Npgsql.Replication
             /// <summary>
             /// The starting point of the WAL data in this message.
             /// </summary>
-            public long WalStart { get; }
+            public ulong WalStart { get; }
 
             /// <summary>
             /// The current end of WAL on the server.
             /// </summary>
-            public long WalEnd { get; }
+            public ulong WalEnd { get; }
 
             /// <summary>
             /// The server's system clock at the time of transmission, as microseconds since midnight on 2000-01-01.
             /// </summary>
-            public long ServerClock { get; }
+            public ulong ServerClock { get; }
 
-            // TODO: WRONG. This probably needs to be streamed.
             /// <summary>
             /// A section of the WAL data stream.
             /// </summary>
@@ -336,7 +416,7 @@ namespace Npgsql.Replication
             /// it can be split at the page boundary. In other words, the first main WAL record and its continuation
             /// records can be sent in different XLogData messages.
             /// </remarks>
-            public ReadOnlyMemory<byte> Data { get; }
+            public Stream Data { get; }
         }
 
         #endregion Support types

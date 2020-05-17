@@ -123,6 +123,8 @@ namespace Npgsql
         /// </summary>
         public Task Ensure(int count, bool async) => Ensure(count, async, dontBreakOnTimeouts: false);
 
+        public Task EnsureAsync(int count) => Ensure(count, async: true, dontBreakOnTimeouts: false);
+
         internal void Ensure(int count)
         {
             if (count <= ReadBytesLeft)
