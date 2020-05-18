@@ -18,6 +18,14 @@ namespace Npgsql.Replication
         Truncate = (byte)'T'
     }
 
+    enum TupleType
+    {
+        Invalid = 0,
+        Key = (byte)'K',
+        NewTuple = (byte)'N',
+        OldTuple = (byte)'O',
+    }
+
     public class OutputReplicationMessage
     {
         /// <summary>
@@ -58,9 +66,9 @@ namespace Npgsql.Replication
     public sealed class CommitMessage : OutputReplicationMessage
     {
         /// <summary>
-        /// Xid of the transaction.
+        /// Flags; currently unused (must be 0).
         /// </summary>
-        public uint Flags { get; set; }
+        public byte Flags { get; set; }
 
         /// <summary>
         /// The LSN of the commit.
@@ -112,14 +120,14 @@ namespace Npgsql.Replication
         /// <summary>
         /// Replica identity setting for the relation (same as relreplident in pg_class).
         /// </summary>
-        public byte RelationReplicaIdentitySetting { get; set; }
+        public char RelationReplicaIdentitySetting { get; set; }
 
-        /// <summary>
-        /// Number of columns.
-        /// </summary>
-        public ushort NumColumns { get; set; }
+        // /// <summary>
+        // /// Number of columns.
+        // /// </summary>
+        // public ushort NumColumns { get; set; }
 
-        List<RelationColumn> Columns { get; } = new List<RelationColumn>();
+        public List<RelationColumn> Columns { get; } = new List<RelationColumn>();
 
         // TODO: Inner?
         public class RelationColumn
@@ -142,7 +150,7 @@ namespace Npgsql.Replication
             /// <summary>
             /// Type modifier of the column (atttypmod).
             /// </summary>
-            public uint TypeModifier { get; set; }
+            public int TypeModifier { get; set; }
         }
     }
 
@@ -176,7 +184,7 @@ namespace Npgsql.Replication
         /// <summary>
         /// Columns representing the new row.
         /// </summary>
-        public List<Column> NewRow { get; set; } = new List<Column>();
+        public List<TupleData> NewRow { get; set; } = new List<TupleData>();
     }
 
     public sealed class UpdateMessage : OutputReplicationMessage
@@ -191,17 +199,17 @@ namespace Npgsql.Replication
         /// <summary>
         /// Columns representing the primary key.
         /// </summary>
-        public List<Column>? KeyRow { get; set; } = new List<Column>();
+        public List<TupleData>? KeyRow { get; set; }
 
         /// <summary>
         /// Columns representing the old values.
         /// </summary>
-        public List<Column>? OldRow { get; set; } = new List<Column>();
+        public List<TupleData>? OldRow { get; set; }
 
         /// <summary>
         /// Columns representing the new row.
         /// </summary>
-        public List<Column> NewRow { get; set; } = new List<Column>();
+        public List<TupleData> NewRow { get; set; } = new List<TupleData>();
     }
 
     public sealed class DeleteMessage : OutputReplicationMessage
@@ -216,20 +224,20 @@ namespace Npgsql.Replication
         /// <summary>
         /// Columns representing the primary key.
         /// </summary>
-        public List<Column>? KeyRow { get; set; } = new List<Column>();
+        public List<TupleData>? KeyRow { get; set; }
 
         /// <summary>
         /// Columns representing the old values.
         /// </summary>
-        public List<Column>? OldRow { get; set; } = new List<Column>();
+        public List<TupleData>? OldRow { get; set; }
     }
 
     public sealed class TruncateMessage : OutputReplicationMessage
     {
-        /// <summary>
-        /// Number of relations.
-        /// </summary>
-        public uint NumRelations { get; set; }
+        // /// <summary>
+        // /// Number of relations.
+        // /// </summary>
+        // public uint NumRelations { get; set; }
 
         /// <summary>
         /// Option bits for TRUNCATE: 1 for CASCADE, 2 for RESTART IDENTITY.
@@ -239,26 +247,26 @@ namespace Npgsql.Replication
         /// <summary>
         /// ID of the relation corresponding to the ID in the relation message. This field is repeated for each relation.
         /// </summary>
-        public uint RelationId { get; set; }
+        public List<uint> RelationIds { get; set; } = new List<uint>();
     }
 
-    public struct Column
+    public struct TupleData
     {
-        public ColumnValueType Type { get; set; }
+        public TupleDataType Type { get; set; }
 
         /// <summary>
-        /// The value of the column, in text format, if <see cref="Type" /> is <see cref="ColumnValueType.TextValue"/>.
+        /// The value of the column, in text format, if <see cref="Type" /> is <see cref="TupleDataType.TextValue"/>.
         /// Otherwise <see langword="null" />.
         /// </summary>
         public string Value { get; set; }
     }
 
-    public enum ColumnValueType
+    public enum TupleDataType
     {
         /// <summary>
         /// Identifies the data as NULL value.
         /// </summary>
-        IsNull,
+        Null,
 
         /// <summary>
         /// Identifies unchanged TOASTed value (the actual value is not sent).

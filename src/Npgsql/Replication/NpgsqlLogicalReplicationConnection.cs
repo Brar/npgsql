@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -163,7 +164,7 @@ namespace Npgsql.Replication
             }
 
             // TODO: We can't dispose this, because it would skip the buffer - it's unaware that we've already
-            // consumed everything yby going directly to the buffer
+            // consumed everything by going directly to the buffer
             /*using*/ var columnStream = new NpgsqlReadBuffer.ColumnStream(connector.ReadBuffer);
 
             while (true)
@@ -264,9 +265,9 @@ namespace Npgsql.Replication
                 switch (messageCode)
                 {
                 case BackendReplicationMessageCode.Begin:
+                {
                     await buf.EnsureAsync(8 + 8 + 4);
-                    // yield return new BeginMessage
-                    var x = new BeginMessage
+                    yield return new BeginMessage
                     {
                         WalStart = xLogData.WalStart,
                         WalEnd = xLogData.WalEnd,
@@ -277,29 +278,206 @@ namespace Npgsql.Replication
                         TransactionXid = buf.ReadUInt32()
                     };
                     continue;
-
+                }
                 case BackendReplicationMessageCode.Commit:
-                    throw new NotImplementedException();
+                {
+                    await buf.EnsureAsync(1 + 8 + 8 + 8);
+                    yield return new CommitMessage
+                    {
+                        WalStart = xLogData.WalStart,
+                        WalEnd = xLogData.WalEnd,
+                        ServerClock = xLogData.ServerClock,
+
+                        Flags = buf.ReadByte(),
+                        CommitLsn = buf.ReadUInt64(),
+                        TransactionEndLsn = buf.ReadUInt64(),
+                        TransactionCommitTimestamp = buf.ReadUInt64()
+                    };
+                    continue;
+                }
                 case BackendReplicationMessageCode.Origin:
                     throw new NotImplementedException();
                 case BackendReplicationMessageCode.Relation:
-                    throw new NotImplementedException();
+                {
+                    await buf.EnsureAsync(4 + 1 + 1 + 1 + 2);
+                    var x = new RelationMessage
+                    {
+                        WalStart = xLogData.WalStart,
+                        WalEnd = xLogData.WalEnd,
+                        ServerClock = xLogData.ServerClock,
+
+                        RelationId = buf.ReadUInt32(),
+                        Namespace = buf.ReadNullTerminatedString(),
+                        RelationName = buf.ReadNullTerminatedString(),
+                        RelationReplicaIdentitySetting = (char)buf.ReadByte()
+                    };
+                    var numColumns = buf.ReadUInt16();
+                    for (var i = 0; i < numColumns; i++)
+                    {
+                        x.Columns.Add(
+                            new RelationMessage.RelationColumn
+                            {
+                                Flags = buf.ReadByte(),
+                                ColumnName = buf.ReadNullTerminatedString(),
+                                DataTypeId = buf.ReadUInt32(),
+                                TypeModifier = buf.ReadInt32()
+                            });
+                    }
+                    yield return x;
+                    continue;
+                }
                 case BackendReplicationMessageCode.Type:
                     throw new NotImplementedException();
                 case BackendReplicationMessageCode.Insert:
-                    throw new NotImplementedException();
+                {
+                    await buf.EnsureAsync(4 + 1 + 2);
+                    var msg = new InsertMessage
+                    {
+                        WalStart = xLogData.WalStart,
+                        WalEnd = xLogData.WalEnd,
+                        ServerClock = xLogData.ServerClock,
+
+                        RelationId = buf.ReadUInt32(),
+                    };
+                    var tupleDataType = (TupleType)buf.ReadByte();
+                    Debug.Assert(tupleDataType == TupleType.NewTuple);
+
+                    var numColumns = buf.ReadUInt16();
+                    await AddTupleDataAsync(numColumns, buf, msg.NewRow);
+                    yield return msg;
+                    continue;
+                }
                 case BackendReplicationMessageCode.Update:
-                    throw new NotImplementedException();
+                {
+                    await buf.EnsureAsync(4 + 1 + 2);
+                    var msg = new UpdateMessage
+                    {
+                        WalStart = xLogData.WalStart,
+                        WalEnd = xLogData.WalEnd,
+                        ServerClock = xLogData.ServerClock,
+
+                        RelationId = buf.ReadUInt32(),
+                    };
+                    var tupleDataType = (TupleType)buf.ReadByte();
+                    var numColumns = buf.ReadUInt16();
+                    switch (tupleDataType)
+                    {
+                        case TupleType.Key:
+                            msg.KeyRow = new List<TupleData>(numColumns);
+                            await AddTupleDataAsync(numColumns, buf, msg.KeyRow);
+                            break;
+                        case TupleType.OldTuple:
+                            msg.OldRow = new List<TupleData>(numColumns);
+                            await AddTupleDataAsync(numColumns, buf, msg.OldRow);
+                            break;
+                        case TupleType.NewTuple:
+                            await AddTupleDataAsync(numColumns, buf, msg.NewRow);
+                            yield return msg;
+                            continue;
+                        default:
+                            throw new NotSupportedException($"The tuple data type '{tupleDataType}' is not supported.");
+                    }
+                    await buf.EnsureAsync(1 + 2);
+                    tupleDataType = (TupleType)buf.ReadByte();
+                    Debug.Assert(tupleDataType == TupleType.NewTuple);
+                    numColumns = buf.ReadUInt16();
+                    await AddTupleDataAsync(numColumns, buf, msg.NewRow);
+                    yield return msg;
+                    continue;
+                }
                 case BackendReplicationMessageCode.Delete:
-                    throw new NotImplementedException();
+                {
+                    await buf.EnsureAsync(4 + 1 + 2);
+                    var msg = new DeleteMessage
+                    {
+                        WalStart = xLogData.WalStart,
+                        WalEnd = xLogData.WalEnd,
+                        ServerClock = xLogData.ServerClock,
+
+                        RelationId = buf.ReadUInt32(),
+                    };
+                    var tupleDataType = (TupleType)buf.ReadByte();
+                    var numColumns = buf.ReadUInt16();
+                    switch (tupleDataType)
+                    {
+                    case TupleType.Key:
+                        msg.KeyRow = new List<TupleData>(numColumns);
+                        await AddTupleDataAsync(numColumns, buf, msg.KeyRow);
+                        break;
+                    case TupleType.OldTuple:
+                        msg.OldRow = new List<TupleData>(numColumns);
+                        await AddTupleDataAsync(numColumns, buf, msg.OldRow);
+                        break;
+                    default:
+                        throw new NotSupportedException($"The tuple data type '{tupleDataType}' is not supported.");
+                    }
+                    yield return msg;
+                    continue;
+                }
                 case BackendReplicationMessageCode.Truncate:
-                    throw new NotImplementedException();
+                {
+                    await buf.EnsureAsync(4 + 1 + 4);
+                    var numRels = buf.ReadUInt32();
+                    var msg = new TruncateMessage()
+                    {
+                        WalStart = xLogData.WalStart,
+                        WalEnd = xLogData.WalEnd,
+                        ServerClock = xLogData.ServerClock,
+
+                        Options = buf.ReadByte()
+                    };
+
+                    for (var i = 0; i < numRels; i++)
+                        msg.RelationIds.Add(buf.ReadUInt32());
+
+                    yield return msg;
+                    continue;
+                }
                 default:
                     throw new ArgumentOutOfRangeException();
                 }
+
+                static async Task AddTupleDataAsync(ushort numColumns, NpgsqlReadBuffer buffer, List<TupleData> row)
+                {
+                    for (var i = 0; i < numColumns; i++)
+                    {
+                        await buffer.EnsureAsync(1);
+                        var submessageType = (char)buffer.ReadByte();
+                        switch (submessageType)
+                        {
+                        case 'n':
+                            row.Add(
+                                new TupleData
+                                {
+                                    Type = TupleDataType.Null
+                                });
+                            break;
+                        case 'u':
+                            row.Add(
+                                new TupleData
+                                {
+                                    Type = TupleDataType.UnchangedToastedValue
+                                });
+                            break;
+                        case 't':
+                            await buffer.EnsureAsync(4);
+                            var len = buffer.ReadInt32();
+                            await buffer.EnsureAsync(len);
+                            row.Add(
+                                new TupleData
+                                {
+                                    Type = TupleDataType.TextValue,
+                                    Value = buffer.ReadString(len)
+                                });
+                            break;
+                        default:
+                            throw new NotSupportedException($"The TupleData submessage type '{submessageType}' is not supported.");
+                        }
+                    }
+                }
             }
 
-            yield return null!;
+            //yield return null!;
             throw new NotImplementedException();
         }
 
