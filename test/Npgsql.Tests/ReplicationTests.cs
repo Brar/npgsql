@@ -22,7 +22,7 @@ namespace Npgsql.Tests
             await conn.ExecuteNonQueryAsync("CREATE TABLE end_to_end_replication (id INT PRIMARY KEY GENERATED ALWAYS AS IDENTITY, name TEXT)");
 
             await replConn.OpenAsync();
-            await replConn.CreateReplicationSlot(slotName, "test_decoding");
+            var slotInfo = await replConn.CreateReplicationSlot(slotName, "test_decoding");
 
             var confirmedFlushLsn = await conn.ExecuteScalarAsync($"SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = '{slotName}'");
             Assert.That(confirmedFlushLsn, Is.Null);
@@ -32,7 +32,7 @@ namespace Npgsql.Tests
             await conn.ExecuteNonQueryAsync("INSERT INTO end_to_end_replication (name) VALUES ('val1')");
             await conn.ExecuteNonQueryAsync("UPDATE end_to_end_replication SET name='val2' WHERE name='val1'");
 
-            var enumerator = replConn.StartReplication(slotName, "0/0").GetAsyncEnumerator();
+            var enumerator = replConn.StartReplicationRaw(slotInfo.SlotName, slotInfo.ConsistentPoint).GetAsyncEnumerator();
 
             Assert.That(await enumerator.MoveNextAsync(), Is.True);
             Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
@@ -85,7 +85,7 @@ namespace Npgsql.Tests
         {
             await using var conn = OpenConnection();
             await using var replConn = new NpgsqlLogicalReplicationConnection(ConnectionString);
-            var slotName = nameof(OutputPlugin) + "Default";
+            var slotName = nameof(OutputPlugin);
 
             await conn.ExecuteNonQueryAsync(@"
 DROP PUBLICATION IF EXISTS default_publication;
@@ -103,7 +103,7 @@ CREATE PUBLICATION default_publication FOR TABLE logical_replication_identity_de
 ");
 
             await replConn.OpenAsync();
-            await replConn.CreateOutputReplicationSlot(slotName);
+            var slot = await replConn.CreateReplicationSlot(slotName);
 
             var confirmedFlushLsn = await conn.ExecuteScalarAsync($"SELECT confirmed_flush_lsn FROM pg_replication_slots WHERE slot_name = '{slotName}'");
             Assert.That(confirmedFlushLsn, Is.Null);
@@ -122,7 +122,7 @@ CREATE PUBLICATION default_publication FOR TABLE logical_replication_identity_de
             await conn.ExecuteNonQueryAsync("UPDATE logical_replication_identity_full SET name='val1' WHERE name='val'");
             await conn.ExecuteNonQueryAsync("DELETE FROM logical_replication_identity_full WHERE name='val1'");
 
-            await using var enumerator = replConn.StartOutputReplication(slotName, "0/0", "default_publication").GetAsyncEnumerator();
+            await using var enumerator = replConn.StartReplication(slot.SlotName, slot.ConsistentPoint, "default_publication").GetAsyncEnumerator();
 
             #region REPLICA IDENTITY DEFAULT
 
