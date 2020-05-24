@@ -84,7 +84,7 @@ namespace Npgsql.Replication
         [PublicAPI]
         public async Task<NpgsqlLogicalReplicationSlotInfo> CreateReplicationSlot(
             string slotName,
-            string outputPlugin,
+            string outputPlugin = "pgoutput",
             bool isTemporary = false,
             SlotSnapshotInitMode slotSnapshotInitMode = SlotSnapshotInitMode.Export)
         {
@@ -129,7 +129,7 @@ namespace Npgsql.Replication
         /// Options to be passed to the slot's logical decoding plugin.
         /// </param>
         [PublicAPI]
-        public async IAsyncEnumerable<XLogData> StartReplication(string slotName, string? walLocation = null, Dictionary<string, object>? options = null)
+        public async IAsyncEnumerable<XLogData> StartReplicationRaw(string slotName, string? walLocation = null, Dictionary<string, string>? options = null)
         {
             var sb = new StringBuilder("START_REPLICATION SLOT ")
                 .Append(slotName)
@@ -237,26 +237,20 @@ namespace Npgsql.Replication
 
         #region PG output plugin
 
-        public Task<NpgsqlLogicalReplicationSlotInfo> CreateOutputReplicationSlot(
-            string slotName,
-            bool isTemporary = false,
-            SlotSnapshotInitMode slotSnapshotInitMode = SlotSnapshotInitMode.Export)
-            => CreateReplicationSlot(slotName, "pgoutput", isTemporary, slotSnapshotInitMode);
-
-        public async IAsyncEnumerable<OutputReplicationMessage> StartOutputReplication(
+        public async IAsyncEnumerable<OutputReplicationMessage> StartReplication(
             string slotName,
             string? walLocation, // TODO: Should be defaultable, maybe fluent API, maybe not
             params string[] publicationNames)  // TODO: Does the user need to specify at least one? If so, possibly force at least one publication name via a separate param
         {
             var buf = Connection.Connector!.ReadBuffer;
 
-            var options = new Dictionary<string, object>
+            var options = new Dictionary<string, string>
             {
                 { "proto_version", "1" },
                 { "publication_names", string.Join(",", publicationNames.Select(pn => $"\"{pn}\"")) }
             };
 
-            await foreach (var xLogData in StartReplication(slotName, walLocation, options))
+            await foreach (var xLogData in StartReplicationRaw(slotName, walLocation, options))
             {
                 // Note that we bypass xLogData.Stream and access the connector's read buffer directly. This is
                 // an ugly hack, but allows us to use all the I/O methods and buffering that are already implemented.
