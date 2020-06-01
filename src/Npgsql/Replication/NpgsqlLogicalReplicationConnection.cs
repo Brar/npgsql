@@ -57,6 +57,8 @@ namespace Npgsql.Replication
 
         #region Replication commands
 
+        static readonly Version V10_0 = new Version(10, 0);
+
         /// <summary>
         /// Create a logical replication slot.
         /// </summary>
@@ -92,26 +94,39 @@ namespace Npgsql.Replication
             if (isTemporary)
                 sb.Append(" TEMPORARY");
             sb.Append(" LOGICAL ").Append(outputPlugin);
-            switch (slotSnapshotInitMode)
-            {
-            case SlotSnapshotInitMode.Export:
-                sb.Append(" EXPORT_SNAPSHOT");
-                break;
-            case SlotSnapshotInitMode.Use:
-                sb.Append(" USE_SNAPSHOT");
-                break;
-            case SlotSnapshotInitMode.NoExport:
-                sb.Append(" NOEXPORT_SNAPSHOT");
-                break;
-            }
 
-            var results = await ReadSingleRow(sb.ToString());
-            return new NpgsqlLogicalReplicationSlotInfo(
-                (string)results[0],
-                (string)results[1],
-                (string)results[2],
-                (string)results[3]
-            );
+            sb.Append(slotSnapshotInitMode switch
+            {
+                // EXPORT_SNAPSHOT is the default.
+                // We don't set it explicitly so that older backends can digest the query too.
+                SlotSnapshotInitMode.Export => string.Empty,
+                SlotSnapshotInitMode.Use => " USE_SNAPSHOT",
+                SlotSnapshotInitMode.NoExport => " NOEXPORT_SNAPSHOT",
+                _ => throw new ArgumentOutOfRangeException(nameof(slotSnapshotInitMode),
+                    slotSnapshotInitMode,
+                    $"Unexpected value {slotSnapshotInitMode} for argument {nameof(slotSnapshotInitMode)}.")
+            });
+            try
+            {
+                var results = await ReadSingleRow(sb.ToString());
+                return new NpgsqlLogicalReplicationSlotInfo(
+                    (string)results[0],
+                    (string)results[1],
+                    (string)results[2],
+                    (string)results[3]
+                );
+            }
+            catch (PostgresException e)
+            {
+                if (Connection.PostgreSqlVersion < V10_0 && e.SqlState == "42601" /* syntax_error */)
+                {
+                    if (isTemporary)
+                        throw new ArgumentException($"Temporary replication slots were introduced in PostgreSQL 10. Using PostgreSQL version {Connection.PostgreSqlVersion.ToString(3)} you have to leave the {nameof(isTemporary)} argument as false.", nameof(isTemporary), e);
+                    if (slotSnapshotInitMode != SlotSnapshotInitMode.Export)
+                        throw new ArgumentException($"The USE_SNAPSHOT and NOEXPORT_SNAPSHOT syntax was introduced in PostgreSQL 10. Using PostgreSQL version {Connection.PostgreSqlVersion.ToString(3)} you have to leave the {nameof(slotSnapshotInitMode)} argument as {nameof(SlotSnapshotInitMode)}.{nameof(SlotSnapshotInitMode.NoExport)}.", nameof(slotSnapshotInitMode), e);
+                }
+                throw;
+            }
         }
 
         /// <summary>
@@ -129,7 +144,7 @@ namespace Npgsql.Replication
         /// Options to be passed to the slot's logical decoding plugin.
         /// </param>
         [PublicAPI]
-        public async IAsyncEnumerable<XLogData> StartReplicationRaw(string slotName, string? walLocation = null, Dictionary<string, string>? options = null)
+        public async IAsyncEnumerable<XLogData> StartReplicationStream(string slotName, string? walLocation = null, Dictionary<string, string>? options = null)
         {
             var sb = new StringBuilder("START_REPLICATION SLOT ")
                 .Append(slotName)
@@ -179,51 +194,35 @@ namespace Npgsql.Replication
                     yield break;
                 }
 
-                switch (msg.Code)
-                {
-                case BackendMessageCode.CopyData:
-                    var copyData = (CopyDataMessage)msg;
-                    await connector.ReadBuffer.Ensure(copyData.Length, true);
-                    var xLogData = ParseCopyData((CopyDataMessage)msg);
-                    if (xLogData != null)
-                        yield return xLogData.Value;
-                    continue;
-                default:
+                if (msg.Code != BackendMessageCode.CopyData)
                     throw connector.UnexpectedMessageReceived(msg.Code);
-                }
-            }
 
-            XLogData? ParseCopyData(CopyDataMessage copyDataMessage)
-            {
-                // TODO: Not all data is in the buffer
                 var buf = Connection.Connector!.ReadBuffer;
-                var len = copyDataMessage.Length;
+                await buf.EnsureAsync(1);
                 var code = (char)buf.ReadByte();
                 switch (code)
                 {
                 case 'w': // XLogData
                 {
-                    var walStart = buf.ReadUInt64();
-                    var walEnd = buf.ReadUInt64();
-                    var serverClock = buf.ReadUInt64();
-                    var dataLen = len - 1 - 8 - 8 - 8;
+                    await buf.EnsureAsync(24);
+                    var startLsn = buf.ReadUInt64();
+                    var endLsn = buf.ReadUInt64();
+                    var sendTime = buf.ReadUInt64();
+                    // dataLen = msg.Length - (code = 1 + walStart = 8 + walEnd = 8 + serverClock = 8)
+                    var dataLen = ((CopyDataMessage)msg).Length - 25;
                     columnStream.Init(dataLen, canSeek: false);
-                    var data = new XLogData(walStart, walEnd, serverClock, columnStream);
-                    // var data  = new XLogData(walStart, walEnd, serverClock, new ReadOnlyMemory<byte>(buf.Buffer, buf.ReadPosition, dataLen));
-                    // buf.ReadPosition += dataLen;
-                    return data;
-                    //var data = new byte[len - 1 - 8 - 8 - 8];
-                    //buf.ReadBytes(data);
-                    //return new XLogData(walStart, walEnd, serverClock, data);
+                    var data = new XLogData(startLsn, endLsn, sendTime, columnStream);
+                    yield return data;
+                    break;
                 }
 
                 case 'k': // Primary keepalive message
                 {
-                    buf.Ensure(sizeof(long) + sizeof(long) + sizeof(byte));
-                    var walEnd = buf.ReadInt64();
-                    var serverClock = buf.ReadInt64();
-                    var replyImmediately = buf.ReadByte() == 1;
-                    return null;
+                    await buf.EnsureAsync(17);
+                    var endLsn = buf.ReadInt64();
+                    var timestamp = buf.ReadInt64();
+                    var replyRequested = buf.ReadByte() == 1;
+                    continue;
                 }
 
                 default:
@@ -250,7 +249,7 @@ namespace Npgsql.Replication
                 { "publication_names", string.Join(",", publicationNames.Select(pn => $"\"{pn}\"")) }
             };
 
-            await foreach (var xLogData in StartReplicationRaw(slotName, walLocation, options))
+            await foreach (var xLogData in StartReplicationStream(slotName, walLocation, options))
             {
                 // Note that we bypass xLogData.Stream and access the connector's read buffer directly. This is
                 // an ugly hack, but allows us to use all the I/O methods and buffering that are already implemented.
