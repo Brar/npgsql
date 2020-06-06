@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -10,7 +9,7 @@ using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Npgsql.BackendMessages;
 using Npgsql.Logging;
-using static Npgsql.Util.Statics;
+
 #pragma warning disable 1591
 
 namespace Npgsql.Replication
@@ -169,23 +168,38 @@ namespace Npgsql.Replication
             {
             case BackendMessageCode.CopyBothResponse:
                 State = ReplicationConnectionState.Streaming;
+                FeedbackTimer.Change(WalReceiverStatusInterval, WalReceiverStatusInterval);
                 break;
             case BackendMessageCode.CompletedResponse:
                 // TODO: This can happen when the client requests streaming at exactly the end of an old timeline.
                 // TODO: Figure out how to communicate these different states to the user
                 throw new NotImplementedException();
             default:
-                throw Connection.Connector!.UnexpectedMessageReceived(msg.Code);
+                throw connector.UnexpectedMessageReceived(msg.Code);
             }
 
-            // TODO: We can't dispose this, because it would skip the buffer - it's unaware that we've already
-            // consumed everything by going directly to the buffer
-            /*using*/ var columnStream = new NpgsqlReadBuffer.ColumnStream(connector.ReadBuffer);
+            var buf = connector.ReadBuffer;
+            NpgsqlReadBuffer.ColumnStream columnStream = new NpgsqlReadBuffer.ColumnStream(buf);
+            var streamInitPosition = -1;
 
             while (true)
             {
+                if (columnStream.IsDisposed)
+                    columnStream = new NpgsqlReadBuffer.ColumnStream(buf);
+
                 try
                 {
+                    // Hack:
+                    // If the stream wasn't read to the end we need to figure out whether it was us ourselves
+                    // who bypassed it, reading directly from the buffer in StartReplication() or if the consumer of
+                    // StartReplicationStream simply didn't read the stream to the end.
+                    // Assuming that, if buf.ReadPosition is still the same as it was when we handed over the stream,
+                    // actually means that the consumer didn't read from the stream is somewhat dangerous as it might
+                    // end up at the exactly same position after reading with some bad luck.
+                    // ToDo: find a better solution for this
+                    if (columnStream.Position < columnStream.Length && buf.ReadPosition == streamInitPosition)
+                        await buf.Skip(columnStream.Length - columnStream.Position, true);
+
                     msg = await connector.ReadMessage(true);
                 }
                 catch (PostgresException e) when (e.SqlState == PostgresErrorCodes.QueryCanceled)
@@ -197,7 +211,7 @@ namespace Npgsql.Replication
                 if (msg.Code != BackendMessageCode.CopyData)
                     throw connector.UnexpectedMessageReceived(msg.Code);
 
-                var buf = Connection.Connector!.ReadBuffer;
+                var messageLength = ((CopyDataMessage)msg).Length;
                 await buf.EnsureAsync(1);
                 var code = (char)buf.ReadByte();
                 switch (code)
@@ -207,9 +221,16 @@ namespace Npgsql.Replication
                     await buf.EnsureAsync(24);
                     var startLsn = buf.ReadUInt64();
                     var endLsn = buf.ReadUInt64();
-                    var sendTime = buf.ReadUInt64();
+                    var sendTime = buf.ReadInt64();
+
+                    if (LastReceivedLsn < startLsn)
+                        LastReceivedLsn = startLsn;
+                    if (LastReceivedLsn < endLsn)
+                        LastReceivedLsn = endLsn;
+
                     // dataLen = msg.Length - (code = 1 + walStart = 8 + walEnd = 8 + serverClock = 8)
-                    var dataLen = ((CopyDataMessage)msg).Length - 25;
+                    var dataLen = messageLength - 25;
+                    streamInitPosition = buf.ReadPosition;
                     columnStream.Init(dataLen, canSeek: false);
                     var data = new XLogData(startLsn, endLsn, sendTime, columnStream);
                     yield return data;
@@ -219,14 +240,20 @@ namespace Npgsql.Replication
                 case 'k': // Primary keepalive message
                 {
                     await buf.EnsureAsync(17);
-                    var endLsn = buf.ReadInt64();
+                    var endLsn = buf.ReadUInt64();
                     var timestamp = buf.ReadInt64();
                     var replyRequested = buf.ReadByte() == 1;
+                    if (LastReceivedLsn < endLsn)
+                        LastReceivedLsn = endLsn;
+                    if (replyRequested)
+                    {
+                        await SendFeedback();
+                    }
                     continue;
                 }
 
                 default:
-                    Connection.Connector.Break();
+                    connector.Break();
                     throw new NpgsqlException($"Unknown replication message code '{code}'");
                 }
             }
@@ -554,7 +581,7 @@ namespace Npgsql.Replication
             internal XLogData(
                 ulong walStart,
                 ulong walEnd,
-                ulong serverClock,
+                long serverClock,
                 Stream data)
             {
                 WalStart = walStart;
@@ -576,7 +603,7 @@ namespace Npgsql.Replication
             /// <summary>
             /// The server's system clock at the time of transmission, as microseconds since midnight on 2000-01-01.
             /// </summary>
-            public ulong ServerClock { get; }
+            public long ServerClock { get; }
 
             /// <summary>
             /// A section of the WAL data stream.

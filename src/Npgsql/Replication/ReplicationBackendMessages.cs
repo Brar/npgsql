@@ -41,7 +41,7 @@ namespace Npgsql.Replication
         /// <summary>
         /// The server's system clock at the time of transmission, as microseconds since midnight on 2000-01-01.
         /// </summary>
-        public ulong ServerClock { get; set; }
+        public long ServerClock { get; set; }
     }
 
     public sealed class BeginMessage : OutputReplicationMessage
