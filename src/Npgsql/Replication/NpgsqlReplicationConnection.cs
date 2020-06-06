@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Net.Security;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,28 +17,21 @@ namespace Npgsql.Replication
         #region Fields
 
         private protected NpgsqlConnection Connection = default!;
-
         private protected ReplicationConnectionState State { get; set; }
-
-        /*
-        /// <summary>
-        /// The location of the last WAL byte + 1 received and written to disk in the standby.
-        /// </summary>
-        long _lastWrittenLsn;
-
-        /// <summary>
-        /// The location of the last WAL byte + 1 flushed to disk in the standby.
-        /// </summary>
-        long _lastFlushedLsn;
-
-        /// <summary>
-        /// The location of the last WAL byte + 1 applied in the standby.
-        /// </summary>
-        long _lastAppliedLsn;
-*/
+        private protected readonly Timer FeedbackTimer;
+        int _timerFence;
+        TimeSpan _walReceiverStatusInterval = TimeSpan.FromSeconds(10d);
         static readonly NpgsqlLogger Log = NpgsqlLogManager.CreateLogger(nameof(NpgsqlReplicationConnection));
 
         #endregion Fields
+
+        /// <summary>
+        /// Initializes a new instance of <see cref="NpgsqlReplicationConnection"/>.
+        /// </summary>
+        protected NpgsqlReplicationConnection()
+        {
+            FeedbackTimer = new Timer(TimerSendFeedback);
+        }
 
         #region Properties
 
@@ -53,6 +45,41 @@ namespace Npgsql.Replication
 #nullable disable
         public string ConnectionString { get; set; }
 #nullable enable
+
+        /// <summary>
+        /// The location of the last WAL byte + 1 received in the standby.
+        /// </summary>
+        public ulong LastReceivedLsn { get; private protected set; }
+
+        /// <summary>
+        /// The location of the last WAL byte + 1 flushed to disk in the standby.
+        /// </summary>
+        public ulong LastFlushedLsn { get; set; }
+
+        /// <summary>
+        /// The location of the last WAL byte + 1 applied (e. g. written to disk) in the standby.
+        /// </summary>
+        public ulong LastAppliedLsn { get; set; }
+
+        /// <summary>
+        /// Send replies at least this often.
+        /// Timeout.<see cref="Timeout.InfiniteTimeSpan"/> disables automated replies.
+        /// </summary>
+        public TimeSpan WalReceiverStatusInterval
+        {
+            get => _walReceiverStatusInterval;
+            set
+            {
+                _walReceiverStatusInterval = value;
+                FeedbackTimer.Change(TimeSpan.Zero, value);
+            }
+        }
+
+        /// <summary>
+        /// Time that receiver waits for communication from master.
+        /// Timeout.<see cref="Timeout.InfiniteTimeSpan"/> disables the timeout.
+        /// </summary>
+        public TimeSpan WalReceiverTimeout { get; set; } = TimeSpan.FromSeconds(60d);
 
         #endregion Properties
 
@@ -72,7 +99,37 @@ namespace Npgsql.Replication
 
         #region Replication commands
 
-        // TODO: Return value...
+        /// <summary>
+        /// Sends a status update to PostgreSQL with the given WAL tracking information.
+        /// The information is recorded by Npgsql and will be used in subsequent periodic status updates.
+        /// </summary>
+        /// <param name="lastFlushedLsn">The location of the last WAL byte + 1 flushed to disk in the standby.</param>
+        /// <param name="lastAppliedLsn">The location of the last WAL byte + 1 applied in the standby.</param>
+        /// <param name="force">Force sending out the status update immediately. Otherwise this just updates the
+        /// internal tracking of <paramref name="lastFlushedLsn"/> and <paramref name="lastAppliedLsn"/> and sends the
+        /// status update on schedule at </param>
+        /// <exception cref="InvalidOperationException"></exception>
+        /// <remarks>
+        /// This is the only method in <see cref="NpgsqlLogicalReplicationConnection"/> you can safely call from a
+        /// separate thread to update the status.
+        /// </remarks>
+        /// <returns>A Task representing the sending fo the status update (and not any PostgreSQL response.</returns>
+        [PublicAPI]
+        public async Task SendStatusUpdate(ulong lastFlushedLsn = 0UL, ulong lastAppliedLsn = 0UL, bool force = false)
+        {
+            if (force && State != ReplicationConnectionState.Streaming)
+                throw new InvalidOperationException("The connection must be streaming in order to send status updates");
+
+            if (lastFlushedLsn > 0UL)
+                LastFlushedLsn = lastFlushedLsn;
+
+            if (lastAppliedLsn > 0UL)
+                LastAppliedLsn = lastAppliedLsn;
+
+            if (force)
+                await SendFeedback();
+        }
+
         /// <summary>
         /// Requests the server to identify itself.
         /// </summary>
@@ -180,28 +237,42 @@ namespace Npgsql.Replication
             return results;
         }
 
-        /// <summary>
-        /// Immediately sends a status update to PostgreSQL with the given WAL tracking information.
-        /// The information is recorded by Npgsql and will be used in subsequent periodic status updates.
-        /// </summary>
-        /// <param name="lastWrittenLsn">The location of the last WAL byte + 1 received and written to disk in the standby.</param>
-        /// <param name="lastFlushedLsn">The location of the last WAL byte + 1 flushed to disk in the standby.</param>
-        /// <param name="lastAppliedLsn">The location of the last WAL byte + 1 applied in the standby.</param>
-        /// <remarks>
-        /// In typical use cases, Npgsql will send period status updates by itself, and this API isn't needed.
-        /// </remarks>
-        /// <returns>A Task representing the sending fo the status update (and not any PostgreSQL response.</returns>
-        [PublicAPI]
-        public async Task SendStatusUpdate(long lastWrittenLsn, long lastFlushedLsn, long lastAppliedLsn)
+        private protected async Task SendFeedback(bool requestReply = false)
         {
-            if (State != ReplicationConnectionState.Streaming)
-                throw new InvalidOperationException("The connection must be streaming in order to send status updates");
+            try
+            {
+                // If we come from TimerSendFeedback the _timerFence is already up and we leave the timer alone.
+                // If we are a forced SendFeedback and the _timerFence is down we set it and reset the timer.
+                if (Interlocked.CompareExchange(ref _timerFence, 1, 0) == 0)
+                    FeedbackTimer.Change(_walReceiverStatusInterval, _walReceiverStatusInterval);
 
-            var connector = Connection.Connector!;
+                var connector = Connection.Connector!;
 
-            // TODO: Clock
-            await connector.WriteReplicationStatusUpdate(lastWrittenLsn, lastFlushedLsn, lastAppliedLsn, 0, false);
-            await connector.Flush(true);
+                await connector.WriteReplicationStatusUpdate(
+                    LastReceivedLsn,
+                    LastFlushedLsn,
+                    LastAppliedLsn,
+                    GetCurrentTimestamp(),
+                    requestReply);
+                await connector.Flush(true);
+            }
+            finally
+            {
+                _timerFence = 0;
+            }
+        }
+
+        async void TimerSendFeedback(object? obj)
+        {
+            if (Interlocked.CompareExchange(ref _timerFence, 1, 0) == 1)
+                return;
+
+            // This can only happen as a race condition if we're already disposed
+            // We don't care about the fence anymore at this point.
+            if (Connection == null)
+                return;
+
+            await SendFeedback();
         }
 
         #region SSL
@@ -230,25 +301,41 @@ namespace Npgsql.Replication
         #region Close / Dispose
 
         /// <inheritdoc />
-        public void Dispose()
-        {
-            if (State == ReplicationConnectionState.Disposed)
-                return;
-            Connection?.Dispose();
-            Connection = null!;
-            State = ReplicationConnectionState.Disposed;
-        }
-
-        /// <inheritdoc />
         public async ValueTask DisposeAsync()
         {
-            if (State == ReplicationConnectionState.Disposed)
-                return;
+            await DisposeAsyncCore();
+
+            Dispose(false);
+            GC.SuppressFinalize(this);
+        }
+
+        private protected virtual async ValueTask DisposeAsyncCore()
+        {
             if (Connection != null)
             {
                 await Connection.DisposeAsync();
                 Connection = null!;
             }
+        }
+
+        /// <inheritdoc />
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        private protected virtual void Dispose(bool disposing)
+        {
+            if (State == ReplicationConnectionState.Disposed)
+                return;
+
+            if (disposing)
+            {
+                Connection?.Dispose();
+                Connection = null!;
+            }
+
             State = ReplicationConnectionState.Disposed;
         }
 
@@ -267,6 +354,8 @@ namespace Npgsql.Replication
             }
             Connection.CheckReadyAndGetConnector();
         }
+
+        long GetCurrentTimestamp() => (DateTime.Now.Ticks - 630822888000000000L) / 10;
 
         private protected enum ReplicationConnectionState
         {

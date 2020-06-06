@@ -322,20 +322,20 @@ namespace Npgsql
 
         // https://www.postgresql.org/docs/current/protocol-replication.html
         internal async Task WriteReplicationStatusUpdate(
-            long lastWrittenLsn,
-            long lastFlushedLsn,
-            long lastAppliedLsn,
+            ulong lastWrittenLsn,
+            ulong lastFlushedLsn,
+            ulong lastAppliedLsn,
             long clock,
             bool requestImmediateReply)
         {
-            const int len = sizeof(byte) + // Message code
-                            sizeof(int)  + // Length
-                            sizeof(byte) + // Payload message code
-                            sizeof(long) + // The location of the last WAL byte + 1 received and written to disk in the standby.
-                            sizeof(long) + // The location of the last WAL byte + 1 flushed to disk in the standby.
-                            sizeof(long) + // The location of the last WAL byte + 1 applied in the standby.
-                            sizeof(long) + // The client's system clock at the time of transmission, as microseconds since midnight on 2000-01-01.
-                            sizeof(byte);  // If 1, the client requests the server to reply to this message immediately. This can be used to ping the server, to test if the connection is still healthy.
+            const int len = sizeof(byte)  + // Message code
+                            sizeof(int)   + // Length
+                            sizeof(byte)  + // Payload message code
+                            sizeof(ulong) + // The location of the last WAL byte + 1 received and written to disk in the standby.
+                            sizeof(ulong) + // The location of the last WAL byte + 1 flushed to disk in the standby.
+                            sizeof(ulong) + // The location of the last WAL byte + 1 applied in the standby.
+                            sizeof(long)  + // The client's system clock at the time of transmission, as microseconds since midnight on 2000-01-01.
+                            sizeof(byte);   // If 1, the client requests the server to reply to this message immediately. This can be used to ping the server, to test if the connection is still healthy.
 
             if (WriteBuffer.WriteSpaceLeft < len)
                 await Flush(true);
@@ -343,9 +343,9 @@ namespace Npgsql
             WriteBuffer.WriteByte(FrontendMessageCode.CopyData);
             WriteBuffer.WriteInt32(len - 1);
             WriteBuffer.WriteByte((byte)'r');  // TODO: enum/const?
-            WriteBuffer.WriteInt64(lastWrittenLsn);
-            WriteBuffer.WriteInt64(lastFlushedLsn);
-            WriteBuffer.WriteInt64(lastAppliedLsn);
+            WriteBuffer.WriteUInt64(lastWrittenLsn);
+            WriteBuffer.WriteUInt64(lastFlushedLsn);
+            WriteBuffer.WriteUInt64(lastAppliedLsn);
             WriteBuffer.WriteInt64(clock);
             WriteBuffer.WriteByte(requestImmediateReply ? (byte)1 : (byte)0);
         }

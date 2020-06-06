@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Npgsql.Replication;
 using NUnit.Framework;
@@ -9,6 +10,48 @@ namespace Npgsql.Tests
 {
     public class ReplicationTests : TestBase
     {
+
+        [Test(Description = "Tests whether INSERT commands get replicated via test_decoding plugin"), NonParallelizable]
+        public async Task ReplicationSurvivesPausesLongerThanWalSenderTimeout() =>
+            await SafeTest(nameof(ReplicationSurvivesPausesLongerThanWalSenderTimeout), async (slotName) =>
+            {
+                await using var conn = OpenConnection();
+                TestUtil.MinimumPgVersion(conn, "9.4", "Logical Replication was introduced in PostgreSQL 9.4");
+                await using var replConn = new NpgsqlLogicalReplicationConnection(new NpgsqlConnectionStringBuilder(ConnectionString)
+                {
+                    ApplicationName = slotName
+                }.ToString());
+
+                await conn.ExecuteNonQueryAsync(@"
+DROP TABLE IF EXISTS logical_replication;
+CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
+");
+                await replConn.OpenAsync();
+                var walSenderTimeout = ParseTimespan(await replConn.Show("wal_sender_timeout"));
+                Console.WriteLine($"The server wal_sender_timeout is configured to {walSenderTimeout}");
+                var walReceiverStatusInterval = TimeSpan.FromTicks(walSenderTimeout.Ticks / 2L);
+                Console.WriteLine($"Setting {nameof(NpgsqlLogicalReplicationConnection)}.{nameof(NpgsqlLogicalReplicationConnection.WalReceiverStatusInterval)} to {walReceiverStatusInterval}");
+                replConn.WalReceiverStatusInterval = walReceiverStatusInterval;
+                var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding");
+                await conn.ExecuteNonQueryAsync("INSERT INTO logical_replication (name) VALUES ('val1')");
+                await using var enumerator = replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint)
+                    .GetAsyncEnumerator();
+
+                // We need to start enumerating in order to actually execute the body of StartReplicationStream
+                // Begin Transaction
+                Assert.That(await enumerator.MoveNextAsync(), Is.True);
+
+                var delay = TimeSpan.FromTicks(checked(walSenderTimeout.Ticks * 2L));
+                Console.WriteLine($"Going to sleep for {delay}");
+                await Task.Delay(delay);
+
+                // Insert, Commit Transaction
+                for (var i = 0; i < 2; i++)
+                {
+                    Assert.That(await enumerator.MoveNextAsync(), Is.True);
+                }
+            });
+
         #region Logical Replication
 
         // The tests in this region are meant to run on PostgreSQL versions back to 9.4 where the
@@ -826,6 +869,36 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
             var memoryStream = new MemoryStream();
             await stream.CopyToAsync(memoryStream);
             return Encoding.UTF8.GetString(memoryStream.ToArray());
+        }
+
+        static TimeSpan ParseTimespan(string str)
+        {
+            var span = str.AsSpan();
+            var pos = 0;
+            var number = 0;
+            while (pos < span.Length)
+            {
+                var c = span[pos];
+                if (!char.IsDigit(c))
+                    break;
+                number = number * 10 + (c - 0x30);
+                pos++;
+            }
+
+            if (number == 0)
+                return Timeout.InfiniteTimeSpan;
+            if ("ms".AsSpan().Equals(span.Slice(pos), StringComparison.Ordinal))
+                return TimeSpan.FromMilliseconds(number);
+            if ("s".AsSpan().Equals(span.Slice(pos), StringComparison.Ordinal))
+                return TimeSpan.FromSeconds(number);
+            if ("min".AsSpan().Equals(span.Slice(pos), StringComparison.Ordinal))
+                return TimeSpan.FromMinutes(number);
+            if ("h".AsSpan().Equals(span.Slice(pos), StringComparison.Ordinal))
+                return TimeSpan.FromHours(number);
+            if ("d".AsSpan().Equals(span.Slice(pos), StringComparison.Ordinal))
+                return TimeSpan.FromDays(number);
+
+            throw new ArgumentException($"Can not parse timestamp '{span.ToString()}'");
         }
 
         static async Task SafeTest(string slotName, Func<string, Task> testAction)
