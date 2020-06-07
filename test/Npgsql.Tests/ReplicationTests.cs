@@ -52,6 +52,132 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
                 }
             });
 
+
+        [Test(Description = "Tests whether INSERT commands get replicated via test_decoding plugin"), NonParallelizable]
+        public async Task SynchronousReplication() =>
+            await SafeTest(nameof(SynchronousReplication), async (slotName) =>
+            {
+                await using var conn = OpenConnection();
+                TestUtil.MinimumPgVersion(conn, "9.4", "Logical Replication was introduced in PostgreSQL 9.4");
+                await using var replConn = new NpgsqlLogicalReplicationConnection(new NpgsqlConnectionStringBuilder(ConnectionString)
+                {
+                    // This must be one of the configured synchronous_standby_names from postgresql.conf
+                    ApplicationName = "npgsql_test_sync_standby"
+                }.ToString());
+                await replConn.OpenAsync();
+                // Set WalReceiverStatusInterval to infinite so that the automated feedback doesn't interfere with
+                // our manual feedback
+                replConn.WalReceiverStatusInterval = Timeout.InfiniteTimeSpan;
+
+                await conn.ExecuteNonQueryAsync(@"
+DROP TABLE IF EXISTS logical_replication;
+CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
+");
+
+                var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding");
+                await using var enumerator = replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint)
+                    .GetAsyncEnumerator();
+
+                // We need to start a separate thread there as the insert command wil not complete until
+                // the transaction successfully completes (which we block here from the standby side) and by that
+                // will occupy the connection it is bound to.
+                var insertTask = Task.Run(async () =>
+                {
+                    await using var insertConn = OpenConnection(new NpgsqlConnectionStringBuilder(ConnectionString)
+                    {
+                        Options = "synchronous_commit=on"
+                    });
+                    await insertConn.ExecuteNonQueryAsync("INSERT INTO logical_replication (name) VALUES ('val1')");
+                });
+                Assert.That(await enumerator.MoveNextAsync(), Is.True);
+                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(await enumerator.MoveNextAsync(), Is.True);
+                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                    Is.EqualTo("table public.logical_replication: INSERT: id[integer]:1 name[text]:'val1'"));
+                Assert.That(await enumerator.MoveNextAsync(), Is.True);
+                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+
+                var result = await conn.ExecuteScalarAsync("SELECT name FROM logical_replication ORDER BY id DESC LIMIT 1;");
+                Assert.That(result, Is.Null); // Not committed yet because we didn't report fsync yet
+
+                // Report last received LSN
+                await replConn.SendStatusUpdate(force: true);
+
+                result = await conn.ExecuteScalarAsync("SELECT name FROM logical_replication ORDER BY id DESC LIMIT 1;");
+                Assert.That(result, Is.Null); // Not committed yet because we still didn't report fsync yet
+
+                // Report last applied LSN
+                await replConn.SendStatusUpdate(lastAppliedLsn: enumerator.Current.WalEnd, force: true);
+
+                result = await conn.ExecuteScalarAsync("SELECT name FROM logical_replication ORDER BY id DESC LIMIT 1;");
+                Assert.That(result, Is.Null); // Not committed yet because we still didn't report fsync yet
+
+                // Report last flushed LSN
+                await replConn.SendStatusUpdate(lastAppliedLsn: enumerator.Current.WalEnd, lastFlushedLsn: enumerator.Current.WalEnd, force: true);
+
+                await insertTask;
+                result = await conn.ExecuteScalarAsync("SELECT name FROM logical_replication ORDER BY id DESC LIMIT 1;");
+                Assert.That(result, Is.EqualTo("val1")); // Now it's committed because we reported fsync
+
+                insertTask = Task.Run(async () =>
+                {
+                    await using var insertConn = OpenConnection(new NpgsqlConnectionStringBuilder(ConnectionString)
+                    {
+                        Options = "synchronous_commit=remote_apply"
+                    });
+                    await insertConn.ExecuteNonQueryAsync("INSERT INTO logical_replication (name) VALUES ('val2')");
+                });
+                Assert.That(await enumerator.MoveNextAsync(), Is.True);
+                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(await enumerator.MoveNextAsync(), Is.True);
+                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                    Is.EqualTo("table public.logical_replication: INSERT: id[integer]:2 name[text]:'val2'"));
+                Assert.That(await enumerator.MoveNextAsync(), Is.True);
+                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+
+                result = await conn.ExecuteScalarAsync("SELECT name FROM logical_replication ORDER BY id DESC LIMIT 1;");
+                Assert.That(result, Is.EqualTo("val1")); // Not committed yet because we didn't report apply yet
+
+                // Report last received LSN
+                await replConn.SendStatusUpdate(force: true);
+
+                result = await conn.ExecuteScalarAsync("SELECT name FROM logical_replication ORDER BY id DESC LIMIT 1;");
+                Assert.That(result, Is.EqualTo("val1")); // Not committed yet because we still didn't report apply yet
+
+                // Report last applied LSN
+                await replConn.SendStatusUpdate(lastAppliedLsn: enumerator.Current.WalEnd, force: true);
+
+                await insertTask;
+                result = await conn.ExecuteScalarAsync("SELECT name FROM logical_replication ORDER BY id DESC LIMIT 1;");
+                Assert.That(result, Is.EqualTo("val2")); // Now it's committed because we reported apply
+
+                insertTask = Task.Run(async () =>
+                {
+                    await using var insertConn = OpenConnection(new NpgsqlConnectionStringBuilder(ConnectionString)
+                    {
+                        Options = "synchronous_commit=remote_write"
+                    });
+                    await insertConn.ExecuteNonQueryAsync("INSERT INTO logical_replication (name) VALUES ('val3')");
+                });
+                Assert.That(await enumerator.MoveNextAsync(), Is.True);
+                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(await enumerator.MoveNextAsync(), Is.True);
+                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                    Is.EqualTo("table public.logical_replication: INSERT: id[integer]:3 name[text]:'val3'"));
+                Assert.That(await enumerator.MoveNextAsync(), Is.True);
+                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+
+                result = await conn.ExecuteScalarAsync("SELECT name FROM logical_replication ORDER BY id DESC LIMIT 1;");
+                Assert.That(result, Is.EqualTo("val2")); // Not committed yet because we didn't report receive yet
+
+                // Report last received LSN
+                await replConn.SendStatusUpdate(force: true);
+
+                await insertTask;
+                result = await conn.ExecuteScalarAsync("SELECT name FROM logical_replication ORDER BY id DESC LIMIT 1;");
+                Assert.That(result, Is.EqualTo("val3")); // Now it's committed because we reported receive
+            });
+
         #region Logical Replication
 
         // The tests in this region are meant to run on PostgreSQL versions back to 9.4 where the
