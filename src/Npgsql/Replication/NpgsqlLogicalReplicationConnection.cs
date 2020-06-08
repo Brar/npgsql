@@ -143,7 +143,7 @@ namespace Npgsql.Replication
         /// Options to be passed to the slot's logical decoding plugin.
         /// </param>
         [PublicAPI]
-        public async IAsyncEnumerable<XLogData> StartReplicationStream(string slotName, string? walLocation = null, Dictionary<string, string>? options = null)
+        public async Task<IAsyncEnumerable<XLogData>> StartReplicationStream(string slotName, string? walLocation = null, Dictionary<string, string>? options = null)
         {
             var sb = new StringBuilder("START_REPLICATION SLOT ")
                 .Append(slotName)
@@ -178,83 +178,89 @@ namespace Npgsql.Replication
                 throw connector.UnexpectedMessageReceived(msg.Code);
             }
 
-            var buf = connector.ReadBuffer;
-            NpgsqlReadBuffer.ColumnStream columnStream = new NpgsqlReadBuffer.ColumnStream(buf);
-            var streamInitPosition = -1;
+            return StartStreaming();
 
-            while (true)
+            async IAsyncEnumerable<XLogData> StartStreaming()
             {
-                if (columnStream.IsDisposed)
-                    columnStream = new NpgsqlReadBuffer.ColumnStream(buf);
+                var buf = connector.ReadBuffer;
+                NpgsqlReadBuffer.ColumnStream columnStream = new NpgsqlReadBuffer.ColumnStream(buf);
+                var streamInitPosition = -1;
 
-                try
+                while (true)
                 {
-                    // Hack:
-                    // If the stream wasn't read to the end we need to figure out whether it was us ourselves
-                    // who bypassed it, reading directly from the buffer in StartReplication() or if the consumer of
-                    // StartReplicationStream simply didn't read the stream to the end.
-                    // Assuming that, if buf.ReadPosition is still the same as it was when we handed over the stream,
-                    // actually means that the consumer didn't read from the stream is somewhat dangerous as it might
-                    // end up at the exactly same position after reading with some bad luck.
-                    // ToDo: find a better solution for this
-                    if (columnStream.Position < columnStream.Length && buf.ReadPosition == streamInitPosition)
-                        await buf.Skip(columnStream.Length - columnStream.Position, true);
+                    if (columnStream.IsDisposed)
+                        columnStream = new NpgsqlReadBuffer.ColumnStream(buf);
 
-                    msg = await connector.ReadMessage(true);
-                }
-                catch (PostgresException e) when (e.SqlState == PostgresErrorCodes.QueryCanceled)
-                {
-                    State = ReplicationConnectionState.Idle;
-                    yield break;
-                }
-
-                if (msg.Code != BackendMessageCode.CopyData)
-                    throw connector.UnexpectedMessageReceived(msg.Code);
-
-                var messageLength = ((CopyDataMessage)msg).Length;
-                await buf.EnsureAsync(1);
-                var code = (char)buf.ReadByte();
-                switch (code)
-                {
-                case 'w': // XLogData
-                {
-                    await buf.EnsureAsync(24);
-                    var startLsn = buf.ReadUInt64();
-                    var endLsn = buf.ReadUInt64();
-                    var sendTime = buf.ReadInt64();
-
-                    if (LastReceivedLsn < startLsn)
-                        LastReceivedLsn = startLsn;
-                    if (LastReceivedLsn < endLsn)
-                        LastReceivedLsn = endLsn;
-
-                    // dataLen = msg.Length - (code = 1 + walStart = 8 + walEnd = 8 + serverClock = 8)
-                    var dataLen = messageLength - 25;
-                    streamInitPosition = buf.ReadPosition;
-                    columnStream.Init(dataLen, canSeek: false);
-                    var data = new XLogData(startLsn, endLsn, sendTime, columnStream);
-                    yield return data;
-                    break;
-                }
-
-                case 'k': // Primary keepalive message
-                {
-                    await buf.EnsureAsync(17);
-                    var endLsn = buf.ReadUInt64();
-                    var timestamp = buf.ReadInt64();
-                    var replyRequested = buf.ReadByte() == 1;
-                    if (LastReceivedLsn < endLsn)
-                        LastReceivedLsn = endLsn;
-                    if (replyRequested)
+                    try
                     {
-                        await SendFeedback();
-                    }
-                    continue;
-                }
+                        // Hack:
+                        // If the stream wasn't read to the end we need to figure out whether it was us ourselves
+                        // who bypassed it, reading directly from the buffer in StartReplication() or if the consumer of
+                        // StartReplicationStream simply didn't read the stream to the end.
+                        // Assuming that, if buf.ReadPosition is still the same as it was when we handed over the stream,
+                        // actually means that the consumer didn't read from the stream is somewhat dangerous as it might
+                        // end up at the exactly same position after reading with some bad luck.
+                        // ToDo: find a better solution for this
+                        if (columnStream.Position < columnStream.Length && buf.ReadPosition == streamInitPosition)
+                            await buf.Skip(columnStream.Length - columnStream.Position, true);
 
-                default:
-                    connector.Break();
-                    throw new NpgsqlException($"Unknown replication message code '{code}'");
+                        msg = await connector.ReadMessage(true);
+                    }
+                    catch (PostgresException e) when (e.SqlState == PostgresErrorCodes.QueryCanceled)
+                    {
+                        State = ReplicationConnectionState.Idle;
+                        yield break;
+                    }
+
+                    if (msg.Code != BackendMessageCode.CopyData)
+                        throw connector.UnexpectedMessageReceived(msg.Code);
+
+                    var messageLength = ((CopyDataMessage)msg).Length;
+                    await buf.EnsureAsync(1);
+                    var code = (char)buf.ReadByte();
+                    switch (code)
+                    {
+                    case 'w': // XLogData
+                    {
+                        await buf.EnsureAsync(24);
+                        var startLsn = buf.ReadUInt64();
+                        var endLsn = buf.ReadUInt64();
+                        var sendTime = buf.ReadInt64();
+
+                        if (LastReceivedLsn < startLsn)
+                            LastReceivedLsn = startLsn;
+                        if (LastReceivedLsn < endLsn)
+                            LastReceivedLsn = endLsn;
+
+                        // dataLen = msg.Length - (code = 1 + walStart = 8 + walEnd = 8 + serverClock = 8)
+                        var dataLen = messageLength - 25;
+                        streamInitPosition = buf.ReadPosition;
+                        columnStream.Init(dataLen, canSeek: false);
+                        var data = new XLogData(startLsn, endLsn, sendTime, columnStream);
+                        yield return data;
+                        break;
+                    }
+
+                    case 'k': // Primary keepalive message
+                    {
+                        await buf.EnsureAsync(17);
+                        var endLsn = buf.ReadUInt64();
+                        var timestamp = buf.ReadInt64();
+                        var replyRequested = buf.ReadByte() == 1;
+                        if (LastReceivedLsn < endLsn)
+                            LastReceivedLsn = endLsn;
+                        if (replyRequested)
+                        {
+                            await SendFeedback();
+                        }
+
+                        continue;
+                    }
+
+                    default:
+                        connector.Break();
+                        throw new NpgsqlException($"Unknown replication message code '{code}'");
+                    }
                 }
             }
         }
@@ -276,7 +282,7 @@ namespace Npgsql.Replication
                 { "publication_names", string.Join(",", publicationNames.Select(pn => $"\"{pn}\"")) }
             };
 
-            await foreach (var xLogData in StartReplicationStream(slotName, walLocation, options))
+            await foreach (var xLogData in await StartReplicationStream(slotName, walLocation, options))
             {
                 // Note that we bypass xLogData.Stream and access the connector's read buffer directly. This is
                 // an ugly hack, but allows us to use all the I/O methods and buffering that are already implemented.
