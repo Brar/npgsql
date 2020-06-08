@@ -34,19 +34,15 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
                 replConn.WalReceiverStatusInterval = walReceiverStatusInterval;
                 var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding");
                 await conn.ExecuteNonQueryAsync("INSERT INTO logical_replication (name) VALUES ('val1')");
-                await using var enumerator = replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint)
+                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
                     .GetAsyncEnumerator();
-
-                // We need to start enumerating in order to actually execute the body of StartReplicationStream
-                // Begin Transaction
-                Assert.That(await enumerator.MoveNextAsync(), Is.True);
 
                 var delay = TimeSpan.FromTicks(checked(walSenderTimeout.Ticks * 2L));
                 Console.WriteLine($"Going to sleep for {delay}");
                 await Task.Delay(delay);
 
-                // Insert, Commit Transaction
-                for (var i = 0; i < 2; i++)
+                // Begin Transaction, Insert, Commit Transaction
+                for (var i = 0; i < 3; i++)
                 {
                     Assert.That(await enumerator.MoveNextAsync(), Is.True);
                 }
@@ -75,10 +71,10 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
 ");
 
                 var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding");
-                await using var enumerator = replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint)
+                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
                     .GetAsyncEnumerator();
 
-                // We need to start a separate thread there as the insert command wil not complete until
+                // We need to start a separate thread here as the insert command wil not complete until
                 // the transaction successfully completes (which we block here from the standby side) and by that
                 // will occupy the connection it is bound to.
                 var insertTask = Task.Run(async () =>
@@ -201,7 +197,7 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
                 await conn.ExecuteNonQueryAsync("INSERT INTO logical_replication (name) VALUES ('val1'), ('val2')");
 
 
-                await using var enumerator = replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint)
+                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
                     .GetAsyncEnumerator();
 
 
@@ -241,7 +237,7 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
                 await conn.ExecuteNonQueryAsync("UPDATE logical_replication SET name='val1' WHERE name='val'");
 
 
-                await using var enumerator = replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint)
+                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
                     .GetAsyncEnumerator();
 
 
@@ -278,7 +274,7 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
                 await conn.ExecuteNonQueryAsync("UPDATE logical_replication SET name='val1' WHERE name='val'");
 
 
-                await using var enumerator = replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint)
+                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
                     .GetAsyncEnumerator();
 
 
@@ -314,7 +310,7 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
                 await conn.ExecuteNonQueryAsync("UPDATE logical_replication SET name='val1' WHERE name='val'");
 
 
-                await using var enumerator = replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint)
+                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
                     .GetAsyncEnumerator();
 
 
@@ -349,7 +345,7 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
                 await conn.ExecuteNonQueryAsync("DELETE FROM logical_replication WHERE name='val2'");
 
 
-                await using var enumerator = replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint)
+                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
                     .GetAsyncEnumerator();
 
 
@@ -386,7 +382,7 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
                 await conn.ExecuteNonQueryAsync("DELETE FROM logical_replication WHERE name='val2'");
 
 
-                await using var enumerator = replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint)
+                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
                     .GetAsyncEnumerator();
 
 
@@ -422,7 +418,7 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
                 await conn.ExecuteNonQueryAsync("DELETE FROM logical_replication WHERE name='val2'");
 
 
-                await using var enumerator = replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint)
+                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
                     .GetAsyncEnumerator();
 
 
@@ -456,7 +452,7 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
                 await conn.ExecuteNonQueryAsync("TRUNCATE TABLE logical_replication RESTART IDENTITY CASCADE");
 
 
-                await using var enumerator = replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint)
+                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
                     .GetAsyncEnumerator();
 
 
