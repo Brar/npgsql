@@ -258,8 +258,7 @@ namespace Npgsql.Replication
                     }
 
                     default:
-                        connector.Break();
-                        throw new NpgsqlException($"Unknown replication message code '{code}'");
+                        throw connector.Break(new NpgsqlException($"Unknown replication message code '{code}'"));
                     }
                 }
             }
