@@ -220,15 +220,16 @@ namespace Npgsql.Replication
                 case "integer":
                     if (!int.TryParse(str, out var num))
                     {
-                        connector.Break();
-                        throw new NpgsqlException($"Could not parse '{str}' as integer in field {field.Name}");
+                        throw connector.Break(
+                            new NpgsqlException($"Could not parse '{str}' as integer in field {field.Name}"));
                     }
 
                     results[i] = num;
                     continue;
                 default:
-                    connector.Break();
-                    throw new NpgsqlException($"Field {field.Name} has PostgreSQL type {field.PostgresType.Name} which isn't supported yet");
+
+                    throw connector.Break(new NpgsqlException(
+                        $"Field {field.Name} has PostgreSQL type {field.PostgresType.Name} which isn't supported yet"));
                 }
             }
 
@@ -352,7 +353,7 @@ namespace Npgsql.Replication
             case ReplicationConnectionState.Disposed:
                 throw new ObjectDisposedException(GetType().Name);
             }
-            Connection.CheckReadyAndGetConnector();
+            Connection.CheckReady();
         }
 
         long GetCurrentTimestamp() => (DateTime.Now.Ticks - 630822888000000000L) / 10;

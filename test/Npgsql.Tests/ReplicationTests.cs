@@ -1023,7 +1023,7 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
             throw new ArgumentException($"Can not parse timestamp '{span.ToString()}'");
         }
 
-        static async Task SafeTest(string slotName, Func<string, Task> testAction)
+        async Task SafeTest(string slotName, Func<string, Task> testAction)
         {
             try
             {
