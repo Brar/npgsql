@@ -20,6 +20,7 @@ namespace Npgsql.Replication
     public sealed class NpgsqlLogicalReplicationConnection : NpgsqlReplicationConnection
     {
         static readonly NpgsqlLogger Log = NpgsqlLogManager.CreateLogger(nameof(NpgsqlLogicalReplicationConnection));
+        bool _bypassingStream = false;
 
         /// <summary>
         /// Initializes a new instance of <see cref="NpgsqlLogicalReplicationConnection"/>.
@@ -168,7 +169,7 @@ namespace Npgsql.Replication
             {
             case BackendMessageCode.CopyBothResponse:
                 State = ReplicationConnectionState.Streaming;
-                FeedbackTimer.Change(WalReceiverStatusInterval, WalReceiverStatusInterval);
+                FeedbackTimer.Change(WalReceiverStatusInterval, Timeout.InfiniteTimeSpan);
                 break;
             case BackendMessageCode.CompletedResponse:
                 // TODO: This can happen when the client requests streaming at exactly the end of an old timeline.
@@ -184,26 +185,11 @@ namespace Npgsql.Replication
             {
                 var buf = connector.ReadBuffer;
                 NpgsqlReadBuffer.ColumnStream columnStream = new NpgsqlReadBuffer.ColumnStream(buf);
-                var streamInitPosition = -1;
 
                 while (true)
                 {
-                    if (columnStream.IsDisposed)
-                        columnStream = new NpgsqlReadBuffer.ColumnStream(buf);
-
                     try
                     {
-                        // Hack:
-                        // If the stream wasn't read to the end we need to figure out whether it was us ourselves
-                        // who bypassed it, reading directly from the buffer in StartReplication() or if the consumer of
-                        // StartReplicationStream simply didn't read the stream to the end.
-                        // Assuming that, if buf.ReadPosition is still the same as it was when we handed over the stream,
-                        // actually means that the consumer didn't read from the stream is somewhat dangerous as it might
-                        // end up at the exactly same position after reading with some bad luck.
-                        // ToDo: find a better solution for this
-                        if (columnStream.Position < columnStream.Length && buf.ReadPosition == streamInitPosition)
-                            await buf.Skip(columnStream.Length - columnStream.Position, true);
-
                         msg = await connector.ReadMessage(true);
                     }
                     catch (PostgresException e) when (e.SqlState == PostgresErrorCodes.QueryCanceled)
@@ -234,11 +220,20 @@ namespace Npgsql.Replication
 
                         // dataLen = msg.Length - (code = 1 + walStart = 8 + walEnd = 8 + serverClock = 8)
                         var dataLen = messageLength - 25;
-                        streamInitPosition = buf.ReadPosition;
                         columnStream.Init(dataLen, canSeek: false);
                         var data = new XLogData(startLsn, endLsn, sendTime, columnStream);
+
                         yield return data;
-                        break;
+
+                        // Our consumer may have disposed the stream which isn't necessary but shouldn't hurt us
+                        if (columnStream.IsDisposed)
+                            columnStream = new NpgsqlReadBuffer.ColumnStream(buf);
+                        // Our consumer may not have read the stream to the end, but it might as well have been us
+                        // ourselves bypassing the stream and reading directly from the buffer in StartReplication()
+                        else if (columnStream.Position < columnStream.Length && !_bypassingStream)
+                            await buf.Skip(columnStream.Length - columnStream.Position, true);
+
+                        continue;
                     }
 
                     case 'k': // Primary keepalive message
@@ -249,10 +244,8 @@ namespace Npgsql.Replication
                         var replyRequested = buf.ReadByte() == 1;
                         if (LastReceivedLsn < endLsn)
                             LastReceivedLsn = endLsn;
-                        if (replyRequested)
-                        {
+                        if (replyRequested && await FeedbackSemaphore.WaitAsync(Timeout.Infinite))
                             await SendFeedback();
-                        }
 
                         continue;
                     }
@@ -280,113 +273,153 @@ namespace Npgsql.Replication
                 { "proto_version", "1" },
                 { "publication_names", string.Join(",", publicationNames.Select(pn => $"\"{pn}\"")) }
             };
-
-            await foreach (var xLogData in await StartReplicationStream(slotName, walLocation, options))
+            try
             {
-                // Note that we bypass xLogData.Stream and access the connector's read buffer directly. This is
-                // an ugly hack, but allows us to use all the I/O methods and buffering that are already implemented.
-                await buf.EnsureAsync(1);
-                var messageCode = (BackendReplicationMessageCode)buf.ReadByte();
-                switch (messageCode)
+                _bypassingStream = true;
+                await foreach (var xLogData in await StartReplicationStream(slotName, walLocation, options))
                 {
-                case BackendReplicationMessageCode.Begin:
-                {
-                    await buf.EnsureAsync(8 + 8 + 4);
-                    yield return new BeginMessage
+                    // Note that we bypass xLogData.Stream and access the connector's read buffer directly. This is
+                    // an ugly hack, but allows us to use all the I/O methods and buffering that are already implemented.
+                    await buf.EnsureAsync(1);
+                    var messageCode = (BackendReplicationMessageCode)buf.ReadByte();
+                    switch (messageCode)
                     {
-                        WalStart = xLogData.WalStart,
-                        WalEnd = xLogData.WalEnd,
-                        ServerClock = xLogData.ServerClock,
+                    case BackendReplicationMessageCode.Begin:
+                    {
+                        await buf.EnsureAsync(8 + 8 + 4);
+                        yield return new BeginMessage
+                        {
+                            WalStart = xLogData.WalStart,
+                            WalEnd = xLogData.WalEnd,
+                            ServerClock = xLogData.ServerClock,
 
-                        TransactionFinalLsn = buf.ReadUInt64(),
-                        TransactionCommitTimestamp = buf.ReadUInt64(),
-                        TransactionXid = buf.ReadUInt32()
-                    };
-                    continue;
-                }
-                case BackendReplicationMessageCode.Commit:
-                {
-                    await buf.EnsureAsync(1 + 8 + 8 + 8);
-                    yield return new CommitMessage
-                    {
-                        WalStart = xLogData.WalStart,
-                        WalEnd = xLogData.WalEnd,
-                        ServerClock = xLogData.ServerClock,
-
-                        Flags = buf.ReadByte(),
-                        CommitLsn = buf.ReadUInt64(),
-                        TransactionEndLsn = buf.ReadUInt64(),
-                        TransactionCommitTimestamp = buf.ReadUInt64()
-                    };
-                    continue;
-                }
-                case BackendReplicationMessageCode.Origin:
-                    throw new NotImplementedException();
-                case BackendReplicationMessageCode.Relation:
-                {
-                    await buf.EnsureAsync(4 + 1 + 1 + 1 + 2);
-                    var x = new RelationMessage
-                    {
-                        WalStart = xLogData.WalStart,
-                        WalEnd = xLogData.WalEnd,
-                        ServerClock = xLogData.ServerClock,
-
-                        RelationId = buf.ReadUInt32(),
-                        Namespace = buf.ReadNullTerminatedString(),
-                        RelationName = buf.ReadNullTerminatedString(),
-                        RelationReplicaIdentitySetting = (char)buf.ReadByte()
-                    };
-                    var numColumns = buf.ReadUInt16();
-                    for (var i = 0; i < numColumns; i++)
-                    {
-                        x.Columns.Add(
-                            new RelationMessage.RelationColumn
-                            {
-                                Flags = buf.ReadByte(),
-                                ColumnName = buf.ReadNullTerminatedString(),
-                                DataTypeId = buf.ReadUInt32(),
-                                TypeModifier = buf.ReadInt32()
-                            });
+                            TransactionFinalLsn = buf.ReadUInt64(),
+                            TransactionCommitTimestamp = buf.ReadUInt64(),
+                            TransactionXid = buf.ReadUInt32()
+                        };
+                        continue;
                     }
-                    yield return x;
-                    continue;
-                }
-                case BackendReplicationMessageCode.Type:
-                    throw new NotImplementedException();
-                case BackendReplicationMessageCode.Insert:
-                {
-                    await buf.EnsureAsync(4 + 1 + 2);
-                    var msg = new InsertMessage
+                    case BackendReplicationMessageCode.Commit:
                     {
-                        WalStart = xLogData.WalStart,
-                        WalEnd = xLogData.WalEnd,
-                        ServerClock = xLogData.ServerClock,
+                        await buf.EnsureAsync(1 + 8 + 8 + 8);
+                        yield return new CommitMessage
+                        {
+                            WalStart = xLogData.WalStart,
+                            WalEnd = xLogData.WalEnd,
+                            ServerClock = xLogData.ServerClock,
 
-                        RelationId = buf.ReadUInt32(),
-                    };
-                    var tupleDataType = (TupleType)buf.ReadByte();
-                    Debug.Assert(tupleDataType == TupleType.NewTuple);
-
-                    var numColumns = buf.ReadUInt16();
-                    await AddTupleDataAsync(numColumns, buf, msg.NewRow);
-                    yield return msg;
-                    continue;
-                }
-                case BackendReplicationMessageCode.Update:
-                {
-                    await buf.EnsureAsync(4 + 1 + 2);
-                    var msg = new UpdateMessage
+                            Flags = buf.ReadByte(),
+                            CommitLsn = buf.ReadUInt64(),
+                            TransactionEndLsn = buf.ReadUInt64(),
+                            TransactionCommitTimestamp = buf.ReadUInt64()
+                        };
+                        continue;
+                    }
+                    case BackendReplicationMessageCode.Origin:
+                        throw new NotImplementedException();
+                    case BackendReplicationMessageCode.Relation:
                     {
-                        WalStart = xLogData.WalStart,
-                        WalEnd = xLogData.WalEnd,
-                        ServerClock = xLogData.ServerClock,
+                        await buf.EnsureAsync(4 + 1 + 1 + 1 + 2);
+                        var x = new RelationMessage
+                        {
+                            WalStart = xLogData.WalStart,
+                            WalEnd = xLogData.WalEnd,
+                            ServerClock = xLogData.ServerClock,
 
-                        RelationId = buf.ReadUInt32(),
-                    };
-                    var tupleDataType = (TupleType)buf.ReadByte();
-                    var numColumns = buf.ReadUInt16();
-                    switch (tupleDataType)
+                            RelationId = buf.ReadUInt32(),
+                            Namespace = buf.ReadNullTerminatedString(),
+                            RelationName = buf.ReadNullTerminatedString(),
+                            RelationReplicaIdentitySetting = (char)buf.ReadByte()
+                        };
+                        var numColumns = buf.ReadUInt16();
+                        for (var i = 0; i < numColumns; i++)
+                        {
+                            x.Columns.Add(
+                                new RelationMessage.RelationColumn
+                                {
+                                    Flags = buf.ReadByte(),
+                                    ColumnName = buf.ReadNullTerminatedString(),
+                                    DataTypeId = buf.ReadUInt32(),
+                                    TypeModifier = buf.ReadInt32()
+                                });
+                        }
+                        yield return x;
+                        continue;
+                    }
+                    case BackendReplicationMessageCode.Type:
+                        throw new NotImplementedException();
+                    case BackendReplicationMessageCode.Insert:
                     {
+                        await buf.EnsureAsync(4 + 1 + 2);
+                        var msg = new InsertMessage
+                        {
+                            WalStart = xLogData.WalStart,
+                            WalEnd = xLogData.WalEnd,
+                            ServerClock = xLogData.ServerClock,
+
+                            RelationId = buf.ReadUInt32(),
+                        };
+                        var tupleDataType = (TupleType)buf.ReadByte();
+                        Debug.Assert(tupleDataType == TupleType.NewTuple);
+
+                        var numColumns = buf.ReadUInt16();
+                        await AddTupleDataAsync(numColumns, buf, msg.NewRow);
+                        yield return msg;
+                        continue;
+                    }
+                    case BackendReplicationMessageCode.Update:
+                    {
+                        await buf.EnsureAsync(4 + 1 + 2);
+                        var msg = new UpdateMessage
+                        {
+                            WalStart = xLogData.WalStart,
+                            WalEnd = xLogData.WalEnd,
+                            ServerClock = xLogData.ServerClock,
+
+                            RelationId = buf.ReadUInt32(),
+                        };
+                        var tupleDataType = (TupleType)buf.ReadByte();
+                        var numColumns = buf.ReadUInt16();
+                        switch (tupleDataType)
+                        {
+                            case TupleType.Key:
+                                msg.KeyRow = new List<TupleData>(numColumns);
+                                await AddTupleDataAsync(numColumns, buf, msg.KeyRow);
+                                break;
+                            case TupleType.OldTuple:
+                                msg.OldRow = new List<TupleData>(numColumns);
+                                await AddTupleDataAsync(numColumns, buf, msg.OldRow);
+                                break;
+                            case TupleType.NewTuple:
+                                await AddTupleDataAsync(numColumns, buf, msg.NewRow);
+                                yield return msg;
+                                continue;
+                            default:
+                                throw new NotSupportedException($"The tuple data type '{tupleDataType}' is not supported.");
+                        }
+                        await buf.EnsureAsync(1 + 2);
+                        tupleDataType = (TupleType)buf.ReadByte();
+                        Debug.Assert(tupleDataType == TupleType.NewTuple);
+                        numColumns = buf.ReadUInt16();
+                        await AddTupleDataAsync(numColumns, buf, msg.NewRow);
+                        yield return msg;
+                        continue;
+                    }
+                    case BackendReplicationMessageCode.Delete:
+                    {
+                        await buf.EnsureAsync(4 + 1 + 2);
+                        var msg = new DeleteMessage
+                        {
+                            WalStart = xLogData.WalStart,
+                            WalEnd = xLogData.WalEnd,
+                            ServerClock = xLogData.ServerClock,
+
+                            RelationId = buf.ReadUInt32(),
+                        };
+                        var tupleDataType = (TupleType)buf.ReadByte();
+                        var numColumns = buf.ReadUInt16();
+                        switch (tupleDataType)
+                        {
                         case TupleType.Key:
                             msg.KeyRow = new List<TupleData>(numColumns);
                             await AddTupleDataAsync(numColumns, buf, msg.KeyRow);
@@ -395,111 +428,78 @@ namespace Npgsql.Replication
                             msg.OldRow = new List<TupleData>(numColumns);
                             await AddTupleDataAsync(numColumns, buf, msg.OldRow);
                             break;
-                        case TupleType.NewTuple:
-                            await AddTupleDataAsync(numColumns, buf, msg.NewRow);
-                            yield return msg;
-                            continue;
                         default:
                             throw new NotSupportedException($"The tuple data type '{tupleDataType}' is not supported.");
+                        }
+                        yield return msg;
+                        continue;
                     }
-                    await buf.EnsureAsync(1 + 2);
-                    tupleDataType = (TupleType)buf.ReadByte();
-                    Debug.Assert(tupleDataType == TupleType.NewTuple);
-                    numColumns = buf.ReadUInt16();
-                    await AddTupleDataAsync(numColumns, buf, msg.NewRow);
-                    yield return msg;
-                    continue;
-                }
-                case BackendReplicationMessageCode.Delete:
-                {
-                    await buf.EnsureAsync(4 + 1 + 2);
-                    var msg = new DeleteMessage
+                    case BackendReplicationMessageCode.Truncate:
                     {
-                        WalStart = xLogData.WalStart,
-                        WalEnd = xLogData.WalEnd,
-                        ServerClock = xLogData.ServerClock,
-
-                        RelationId = buf.ReadUInt32(),
-                    };
-                    var tupleDataType = (TupleType)buf.ReadByte();
-                    var numColumns = buf.ReadUInt16();
-                    switch (tupleDataType)
-                    {
-                    case TupleType.Key:
-                        msg.KeyRow = new List<TupleData>(numColumns);
-                        await AddTupleDataAsync(numColumns, buf, msg.KeyRow);
-                        break;
-                    case TupleType.OldTuple:
-                        msg.OldRow = new List<TupleData>(numColumns);
-                        await AddTupleDataAsync(numColumns, buf, msg.OldRow);
-                        break;
-                    default:
-                        throw new NotSupportedException($"The tuple data type '{tupleDataType}' is not supported.");
-                    }
-                    yield return msg;
-                    continue;
-                }
-                case BackendReplicationMessageCode.Truncate:
-                {
-                    await buf.EnsureAsync(4 + 1 + 4);
-                    var numRels = buf.ReadUInt32();
-                    var msg = new TruncateMessage()
-                    {
-                        WalStart = xLogData.WalStart,
-                        WalEnd = xLogData.WalEnd,
-                        ServerClock = xLogData.ServerClock,
-
-                        Options = buf.ReadByte()
-                    };
-
-                    for (var i = 0; i < numRels; i++)
-                        msg.RelationIds.Add(buf.ReadUInt32());
-
-                    yield return msg;
-                    continue;
-                }
-                default:
-                    throw new ArgumentOutOfRangeException();
-                }
-
-                static async Task AddTupleDataAsync(ushort numColumns, NpgsqlReadBuffer buffer, List<TupleData> row)
-                {
-                    for (var i = 0; i < numColumns; i++)
-                    {
-                        await buffer.EnsureAsync(1);
-                        var submessageType = (char)buffer.ReadByte();
-                        switch (submessageType)
+                        await buf.EnsureAsync(4 + 1 + 4);
+                        var numRels = buf.ReadUInt32();
+                        var msg = new TruncateMessage()
                         {
-                        case 'n':
-                            row.Add(
-                                new TupleData
-                                {
-                                    Type = TupleDataType.Null
-                                });
-                            break;
-                        case 'u':
-                            row.Add(
-                                new TupleData
-                                {
-                                    Type = TupleDataType.UnchangedToastedValue
-                                });
-                            break;
-                        case 't':
-                            await buffer.EnsureAsync(4);
-                            var len = buffer.ReadInt32();
-                            await buffer.EnsureAsync(len);
-                            row.Add(
-                                new TupleData
-                                {
-                                    Type = TupleDataType.TextValue,
-                                    Value = buffer.ReadString(len)
-                                });
-                            break;
-                        default:
-                            throw new NotSupportedException($"The TupleData submessage type '{submessageType}' is not supported.");
+                            WalStart = xLogData.WalStart,
+                            WalEnd = xLogData.WalEnd,
+                            ServerClock = xLogData.ServerClock,
+
+                            Options = buf.ReadByte()
+                        };
+
+                        for (var i = 0; i < numRels; i++)
+                            msg.RelationIds.Add(buf.ReadUInt32());
+
+                        yield return msg;
+                        continue;
+                    }
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                    }
+
+                    static async Task AddTupleDataAsync(ushort numColumns, NpgsqlReadBuffer buffer, List<TupleData> row)
+                    {
+                        for (var i = 0; i < numColumns; i++)
+                        {
+                            await buffer.EnsureAsync(1);
+                            var submessageType = (char)buffer.ReadByte();
+                            switch (submessageType)
+                            {
+                            case 'n':
+                                row.Add(
+                                    new TupleData
+                                    {
+                                        Type = TupleDataType.Null
+                                    });
+                                break;
+                            case 'u':
+                                row.Add(
+                                    new TupleData
+                                    {
+                                        Type = TupleDataType.UnchangedToastedValue
+                                    });
+                                break;
+                            case 't':
+                                await buffer.EnsureAsync(4);
+                                var len = buffer.ReadInt32();
+                                await buffer.EnsureAsync(len);
+                                row.Add(
+                                    new TupleData
+                                    {
+                                        Type = TupleDataType.TextValue,
+                                        Value = buffer.ReadString(len)
+                                    });
+                                break;
+                            default:
+                                throw new NotSupportedException($"The TupleData submessage type '{submessageType}' is not supported.");
+                            }
                         }
                     }
                 }
+            }
+            finally
+            {
+                _bypassingStream = false;
             }
 
             //yield return null!;

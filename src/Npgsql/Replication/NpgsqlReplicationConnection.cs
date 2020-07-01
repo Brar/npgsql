@@ -19,9 +19,9 @@ namespace Npgsql.Replication
         private protected NpgsqlConnection Connection = default!;
         private protected ReplicationConnectionState State { get; set; }
         private protected readonly Timer FeedbackTimer;
-        int _timerFence;
-        TimeSpan _walReceiverStatusInterval = TimeSpan.FromSeconds(10d);
+        private protected readonly SemaphoreSlim FeedbackSemaphore = new SemaphoreSlim(1, 1);
         static readonly NpgsqlLogger Log = NpgsqlLogManager.CreateLogger(nameof(NpgsqlReplicationConnection));
+        long _disposing;
 
         #endregion Fields
 
@@ -65,15 +65,7 @@ namespace Npgsql.Replication
         /// Send replies at least this often.
         /// Timeout.<see cref="Timeout.InfiniteTimeSpan"/> disables automated replies.
         /// </summary>
-        public TimeSpan WalReceiverStatusInterval
-        {
-            get => _walReceiverStatusInterval;
-            set
-            {
-                _walReceiverStatusInterval = value;
-                FeedbackTimer.Change(TimeSpan.Zero, value);
-            }
-        }
+        public TimeSpan WalReceiverStatusInterval { get; set; } = TimeSpan.FromSeconds(10d);
 
         /// <summary>
         /// Time that receiver waits for communication from master.
@@ -126,7 +118,7 @@ namespace Npgsql.Replication
             if (lastAppliedLsn > 0UL)
                 LastAppliedLsn = lastAppliedLsn;
 
-            if (force)
+            if (force && await FeedbackSemaphore.WaitAsync(Timeout.Infinite))
                 await SendFeedback();
         }
 
@@ -242,12 +234,15 @@ namespace Npgsql.Replication
         {
             try
             {
-                // If we come from TimerSendFeedback the _timerFence is already up and we leave the timer alone.
-                // If we are a forced SendFeedback and the _timerFence is down we set it and reset the timer.
-                if (Interlocked.CompareExchange(ref _timerFence, 1, 0) == 0)
-                    FeedbackTimer.Change(_walReceiverStatusInterval, _walReceiverStatusInterval);
+                // Disable the timer while we are sending
+                FeedbackTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
 
                 var connector = Connection.Connector!;
+
+                // This can only happen as a race condition if we're already disposed
+                // in that state we can't use the connector any more so we back off
+                if (connector == null)
+                    return;
 
                 await connector.WriteReplicationStatusUpdate(
                     LastReceivedLsn,
@@ -259,21 +254,23 @@ namespace Npgsql.Replication
             }
             finally
             {
-                _timerFence = 0;
+                // Restart the timer
+                FeedbackTimer.Change(WalReceiverStatusInterval, Timeout.InfiniteTimeSpan);
+                FeedbackSemaphore.Release();
             }
         }
 
         async void TimerSendFeedback(object? obj)
         {
-            if (Interlocked.CompareExchange(ref _timerFence, 1, 0) == 1)
-                return;
-
-            // This can only happen as a race condition if we're already disposed
-            // We don't care about the fence anymore at this point.
-            if (Connection == null)
-                return;
-
-            await SendFeedback();
+            try
+            {
+                if (await FeedbackSemaphore.WaitAsync(TimeSpan.Zero))
+                    await SendFeedback();
+            }
+            // The timer thread might race against Dispose() which means that FeedbackTimer might already
+            // be disposed. We ignore that since we're in tear down mode anyways and timer feedback isn't considered
+            // mandatory.
+            catch (ObjectDisposedException) { }
         }
 
         #region SSL
@@ -312,11 +309,24 @@ namespace Npgsql.Replication
 
         private protected virtual async ValueTask DisposeAsyncCore()
         {
+            if (Interlocked.Exchange(ref _disposing, 1) == 1)
+                return;
+
+            // If there's a running feedback, wait for it to finish, then grab FeedbackSemaphore and never release it
+            // again.
+            // We don't dispose FeedbackSemaphore though since SemaphoreSlim.Dispose() isn't thread safe and the current
+            // implementation doesn't actually dispose anything unless you use the AvailableWaitHandle property.
+            // ToDO: Think about a reasonable timeout and what to do in case of a timeout.
+            // We definitely don't want to block in dispose forever.
+            await FeedbackSemaphore.WaitAsync();
+
+#if NET461 || NETSTANDARD2_0
+            FeedbackTimer.Dispose();
+#else
+            await FeedbackTimer.DisposeAsync();
+#endif
             if (Connection != null)
-            {
                 await Connection.DisposeAsync();
-                Connection = null!;
-            }
         }
 
         /// <inheritdoc />
@@ -328,13 +338,15 @@ namespace Npgsql.Replication
 
         private protected virtual void Dispose(bool disposing)
         {
-            if (State == ReplicationConnectionState.Disposed)
-                return;
-
             if (disposing)
             {
+                if (Interlocked.Exchange(ref _disposing, 1) == 1)
+                    return;
+
+                FeedbackSemaphore.Wait();
+
+                FeedbackTimer.Dispose();
                 Connection?.Dispose();
-                Connection = null!;
             }
 
             State = ReplicationConnectionState.Disposed;
