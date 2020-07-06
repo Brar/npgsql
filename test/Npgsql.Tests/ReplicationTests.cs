@@ -4,6 +4,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Npgsql.Replication;
+using Npgsql.Replication.Logical;
+using Npgsql.Replication.Logical.Protocol;
 using NUnit.Framework;
 
 namespace Npgsql.Tests
@@ -12,8 +14,8 @@ namespace Npgsql.Tests
     {
 
         [Test(Description = "Tests whether INSERT commands get replicated via test_decoding plugin"), NonParallelizable]
-        public async Task ReplicationSurvivesPausesLongerThanWalSenderTimeout() =>
-            await SafeTest(nameof(ReplicationSurvivesPausesLongerThanWalSenderTimeout), async (slotName) =>
+        public Task ReplicationSurvivesPausesLongerThanWalSenderTimeout() =>
+            SafeTest(nameof(ReplicationSurvivesPausesLongerThanWalSenderTimeout), async (slotName) =>
             {
                 await using var conn = OpenConnection();
                 TestUtil.MinimumPgVersion(conn, "9.4", "Logical Replication was introduced in PostgreSQL 9.4");
@@ -50,8 +52,8 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
 
 
         [Test(Description = "Tests whether INSERT commands get replicated via test_decoding plugin"), NonParallelizable]
-        public async Task SynchronousReplication() =>
-            await SafeTest(nameof(SynchronousReplication), async (slotName) =>
+        public Task SynchronousReplication() =>
+            SafeTest(nameof(SynchronousReplication), async (slotName) =>
             {
                 await using var conn = OpenConnection();
                 TestUtil.MinimumPgVersion(conn, "9.4", "Logical Replication was introduced in PostgreSQL 9.4");
@@ -182,8 +184,8 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
         #region test_decoding (consuming XlogData.Data as raw stream)
 
         [Test(Description = "Tests whether INSERT commands get replicated via test_decoding plugin"), NonParallelizable]
-        public async Task StartReplicationStreamReplicatesInsert() =>
-            await SafeTest(nameof(StartReplicationStreamReplicatesInsert), async (slotName) =>
+        public Task StartReplicationStreamReplicatesInsert() =>
+            SafeTest(nameof(StartReplicationStreamReplicatesInsert), async (slotName) =>
             {
                 await using var conn = OpenConnection();
                 TestUtil.MinimumPgVersion(conn, "9.4", "Logical Replication was introduced in PostgreSQL 9.4");
@@ -221,8 +223,8 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
             });
 
         [Test(Description = "Tests whether UPDATE commands get replicated via test_decoding plugin for tables using the default replica identity"), NonParallelizable]
-        public async Task StartReplicationStreamReplicatesUpdateForDefaultReplicaIdentity() =>
-            await SafeTest(nameof(StartReplicationStreamReplicatesUpdateForDefaultReplicaIdentity), async (slotName) =>
+        public Task StartReplicationStreamReplicatesUpdateForDefaultReplicaIdentity() =>
+            SafeTest(nameof(StartReplicationStreamReplicatesUpdateForDefaultReplicaIdentity), async (slotName) =>
             {
                 await using var conn = OpenConnection();
                 TestUtil.MinimumPgVersion(conn, "9.4", "Logical Replication was introduced in PostgreSQL 9.4");
@@ -256,8 +258,8 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
             });
 
         [Test(Description = "Tests whether UPDATE commands get replicated via test_decoding plugin for tables using an index as replica identity"), NonParallelizable]
-        public async Task StartReplicationStreamReplicatesUpdateForIndexReplicaIdentity() =>
-            await SafeTest(nameof(StartReplicationStreamReplicatesUpdateForIndexReplicaIdentity), async (slotName) =>
+        public Task StartReplicationStreamReplicatesUpdateForIndexReplicaIdentity() =>
+            SafeTest(nameof(StartReplicationStreamReplicatesUpdateForIndexReplicaIdentity), async (slotName) =>
             {
                 await using var conn = OpenConnection();
                 TestUtil.MinimumPgVersion(conn, "9.4", "Logical Replication was introduced in PostgreSQL 9.4");
@@ -293,8 +295,8 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
             });
 
         [Test(Description = "Tests whether UPDATE commands get replicated via test_decoding plugin for tables using full replica identity"), NonParallelizable]
-        public async Task StartReplicationStreamReplicatesUpdateForFullReplicaIdentity() =>
-            await SafeTest(nameof(StartReplicationStreamReplicatesUpdateForFullReplicaIdentity), async (slotName) =>
+        public Task StartReplicationStreamReplicatesUpdateForFullReplicaIdentity() =>
+            SafeTest(nameof(StartReplicationStreamReplicatesUpdateForFullReplicaIdentity), async (slotName) =>
             {
                 await using var conn = OpenConnection();
                 TestUtil.MinimumPgVersion(conn, "9.4", "Logical Replication was introduced in PostgreSQL 9.4");
@@ -329,8 +331,8 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
             });
 
         [Test(Description = "Tests whether DELETE commands get replicated via test_decoding plugin for tables using the default replica identity"), NonParallelizable]
-        public async Task StartReplicationStreamReplicatesDeleteForDefaultReplicaIdentity() =>
-            await SafeTest(nameof(StartReplicationStreamReplicatesDeleteForDefaultReplicaIdentity), async (slotName) =>
+        public Task StartReplicationStreamReplicatesDeleteForDefaultReplicaIdentity() =>
+            SafeTest(nameof(StartReplicationStreamReplicatesDeleteForDefaultReplicaIdentity), async (slotName) =>
             {
                 await using var conn = OpenConnection();
                 TestUtil.MinimumPgVersion(conn, "9.4", "Logical Replication was introduced in PostgreSQL 9.4");
@@ -364,8 +366,8 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
             });
 
         [Test(Description = "Tests whether DELETE commands get replicated via test_decoding plugin for tables using an index as replica identity"), NonParallelizable]
-        public async Task StartReplicationStreamReplicatesDeleteForIndexReplicaIdentity() =>
-            await SafeTest(nameof(StartReplicationStreamReplicatesDeleteForIndexReplicaIdentity), async (slotName) =>
+        public Task StartReplicationStreamReplicatesDeleteForIndexReplicaIdentity() =>
+            SafeTest(nameof(StartReplicationStreamReplicatesDeleteForIndexReplicaIdentity), async (slotName) =>
             {
                 await using var conn = OpenConnection();
                 TestUtil.MinimumPgVersion(conn, "9.4", "Logical Replication was introduced in PostgreSQL 9.4");
@@ -401,8 +403,8 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
             });
 
         [Test(Description = "Tests whether DELETE commands get replicated via test_decoding plugin for tables using full replica identity"), NonParallelizable]
-        public async Task StartReplicationStreamReplicatesDeleteForFullReplicaIdentity() =>
-            await SafeTest(nameof(StartReplicationStreamReplicatesDeleteForFullReplicaIdentity), async (slotName) =>
+        public Task StartReplicationStreamReplicatesDeleteForFullReplicaIdentity() =>
+            SafeTest(nameof(StartReplicationStreamReplicatesDeleteForFullReplicaIdentity), async (slotName) =>
             {
                 await using var conn = OpenConnection();
                 TestUtil.MinimumPgVersion(conn, "9.4", "Logical Replication was introduced in PostgreSQL 9.4");
@@ -437,8 +439,8 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
             });
 
         [Test(Description = "Tests whether TRUNCATE commands get replicated via test_decoding plugin"), NonParallelizable]
-        public async Task StartReplicationStreamReplicatesTruncate() =>
-            await SafeTest(nameof(StartReplicationStreamReplicatesInsert), async (slotName) =>
+        public Task StartReplicationStreamReplicatesTruncate() =>
+            SafeTest(nameof(StartReplicationStreamReplicatesInsert), async (slotName) =>
             {
                 await using var conn = OpenConnection();
                 TestUtil.MinimumPgVersion(conn, "11.0", "Replication of TRUNCATE commands was introduced in PostgreSQL 11");
@@ -570,8 +572,6 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
             Assert.That(await enumerator.MoveNextAsync(), Is.True);
             Assert.That(enumerator.Current, Is.TypeOf<UpdateMessage>());
             var updateMsg = (UpdateMessage)enumerator.Current;
-            Assert.That(updateMsg.OldRow, Is.Null);
-            Assert.That(updateMsg.KeyRow, Is.Null);
             Assert.That(updateMsg.NewRow.Count, Is.EqualTo(2));
             Assert.That(updateMsg.NewRow[0].Value, Is.EqualTo("1"));
             Assert.That(updateMsg.NewRow[1].Value, Is.EqualTo("val1"));
@@ -621,9 +621,8 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
 
             // Update
             Assert.That(await enumerator.MoveNextAsync(), Is.True);
-            Assert.That(enumerator.Current, Is.TypeOf<UpdateMessage>());
-            var updateMsg = (UpdateMessage)enumerator.Current;
-            Assert.That(updateMsg.OldRow, Is.Null);
+            Assert.That(enumerator.Current, Is.TypeOf<IndexUpdateMessage>());
+            var updateMsg = (IndexUpdateMessage)enumerator.Current;
             Assert.That(updateMsg.KeyRow!.Count, Is.EqualTo(2));
             Assert.That(updateMsg.KeyRow![0].Value, Is.Null);
             Assert.That(updateMsg.KeyRow![1].Value, Is.EqualTo("val"));
@@ -675,9 +674,8 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
 
             // Update
             Assert.That(await enumerator.MoveNextAsync(), Is.True);
-            Assert.That(enumerator.Current, Is.TypeOf<UpdateMessage>());
-            var updateMsg = (UpdateMessage)enumerator.Current;
-            Assert.That(updateMsg.KeyRow, Is.Null);
+            Assert.That(enumerator.Current, Is.TypeOf<FullUpdateMessage>());
+            var updateMsg = (FullUpdateMessage)enumerator.Current;
             Assert.That(updateMsg.OldRow!.Count, Is.EqualTo(2));
             Assert.That(updateMsg.OldRow![0].Value, Is.EqualTo("1"));
             Assert.That(updateMsg.OldRow![1].Value, Is.EqualTo("val"));
@@ -728,9 +726,8 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
 
             // Delete
             Assert.That(await enumerator.MoveNextAsync(), Is.True);
-            Assert.That(enumerator.Current, Is.TypeOf<DeleteMessage>());
-            var deleteMsg = (DeleteMessage)enumerator.Current;
-            Assert.That(deleteMsg.OldRow, Is.Null);
+            Assert.That(enumerator.Current, Is.TypeOf<KeyDeleteMessage>());
+            var deleteMsg = (KeyDeleteMessage)enumerator.Current;
             Assert.That(deleteMsg.KeyRow!.Count, Is.EqualTo(2));
             Assert.That(deleteMsg.KeyRow[0].Value, Is.EqualTo("2"));
             Assert.That(deleteMsg.KeyRow[1].Value, Is.Null);
@@ -780,8 +777,8 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
 
             // Delete
             Assert.That(await enumerator.MoveNextAsync(), Is.True);
-            Assert.That(enumerator.Current, Is.TypeOf<DeleteMessage>());
-            var deleteMsg = (DeleteMessage)enumerator.Current;
+            Assert.That(enumerator.Current, Is.TypeOf<KeyDeleteMessage>());
+            var deleteMsg = (KeyDeleteMessage)enumerator.Current;
             Assert.That(deleteMsg.KeyRow!.Count, Is.EqualTo(2));
             Assert.That(deleteMsg.KeyRow[0].Value, Is.Null);
             Assert.That(deleteMsg.KeyRow[1].Value, Is.EqualTo("val2"));
@@ -830,8 +827,8 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
 
             // Delete
             Assert.That(await enumerator.MoveNextAsync(), Is.True);
-            Assert.That(enumerator.Current, Is.TypeOf<DeleteMessage>());
-            var deleteMsg = (DeleteMessage)enumerator.Current;
+            Assert.That(enumerator.Current, Is.TypeOf<FullDeleteMessage>());
+            var deleteMsg = (FullDeleteMessage)enumerator.Current;
             Assert.That(deleteMsg.OldRow!.Count, Is.EqualTo(2));
             Assert.That(deleteMsg.OldRow[0].Value, Is.EqualTo("2"));
             Assert.That(deleteMsg.OldRow[1].Value, Is.EqualTo("val2"));
@@ -881,7 +878,7 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
             Assert.That(await enumerator.MoveNextAsync(), Is.True);
             Assert.That(enumerator.Current, Is.TypeOf<TruncateMessage>());
             var truncateMsg = (TruncateMessage)enumerator.Current;
-            Assert.That(truncateMsg.Options, Is.EqualTo(3));
+            Assert.That(truncateMsg.Options, Is.EqualTo(TruncateOptions.Cascade | TruncateOptions.RestartIdentity));
             Assert.That(truncateMsg.RelationIds.Count, Is.EqualTo(1));
 
             // Commit Transaction
@@ -950,9 +947,9 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
         }
 
         [Test(Description = "Tests whether an attempt to create a temporary replication slot gives a useful exception for PostgreSQL 9.6 and below."), NonParallelizable]
-        [TestCase(NpgsqlLogicalReplicationConnection.SlotSnapshotInitMode.Use)]
-        [TestCase(NpgsqlLogicalReplicationConnection.SlotSnapshotInitMode.NoExport)]
-        public async Task NonDefaultSlotSnapshotInitModeThrowsForOldBackends(NpgsqlLogicalReplicationConnection.SlotSnapshotInitMode mode)
+        [TestCase(SlotSnapshotInitMode.Use)]
+        [TestCase(SlotSnapshotInitMode.NoExport)]
+        public async Task NonDefaultSlotSnapshotInitModeThrowsForOldBackends(SlotSnapshotInitMode mode)
         {
             await using var conn = OpenConnection();
             TestUtil.MinimumPgVersion(conn, "9.4", "Logical Replication was introduced in PostgreSQL 9.4");
@@ -981,7 +978,7 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
         public async Task Setup()
         {
             await using var conn = OpenConnection();
-            var walLevel = (string)await conn.ExecuteScalarAsync("SHOW wal_level");
+            var walLevel = (string)(await conn.ExecuteScalarAsync("SHOW wal_level"))!;
             if (walLevel != "logical")
                 TestUtil.IgnoreExceptOnBuildServer("wal_level needs to be set to 'logical' in the PostgreSQL conf");
         }
