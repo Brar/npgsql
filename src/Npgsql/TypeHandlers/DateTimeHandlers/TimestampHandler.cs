@@ -79,6 +79,11 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
         protected NpgsqlDateTime ReadTimeStamp(NpgsqlReadBuffer buf, int len, FieldDescription? fieldDescription = null)
         {
             var value = buf.ReadInt64();
+            return Int64ToNpgsqlDateTime(value);
+        }
+
+        internal static NpgsqlDateTime Int64ToNpgsqlDateTime(long value)
+        {
             if (value == long.MaxValue)
                 return NpgsqlDateTime.Infinity;
             if (value == long.MinValue)

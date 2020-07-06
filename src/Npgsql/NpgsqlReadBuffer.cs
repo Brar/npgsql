@@ -535,6 +535,56 @@ namespace Npgsql
             return result;
         }
 
+        /// <summary>
+        /// Seeks the first null terminator (\0) and returns the string up to it. If the buffer doesn't already
+        /// contain the entire string and its terminator the data is fetched from the network stream.
+        /// </summary>
+        internal Task<string> ReadNullTerminatedStringAsync() => ReadNullTerminatedStringAsync(TextEncoding);
+
+        /// <summary>
+        /// Seeks the first null terminator (\0) and returns the string up to it. If the buffer doesn't already
+        /// contain the entire string and its terminator the data is fetched from the network stream.
+        /// </summary>
+        /// <param name="encoding">Decodes the messages with this encoding.</param>
+        internal Task<string> ReadNullTerminatedStringAsync(Encoding encoding)
+        {
+            for (var i = ReadPosition; i < FilledBytes; i++)
+            {
+                if (Buffer[i] != 0)
+                    continue;
+
+                var result = encoding.GetString(Buffer, ReadPosition, i - ReadPosition);
+                ReadPosition = i + 1;
+                return Task.FromResult(result);
+            }
+
+            return ReadFromStream();
+
+            async Task<string> ReadFromStream()
+            {
+                var ensure = 1;
+                while (true)
+                {
+                    if (ensure > Size)
+                        throw new NotSupportedException(
+                            "Reading a null-terminated string longer than the buffer size isn't supported.");
+                    await EnsureAsync(ensure);
+                    int i;
+                    for (i = ReadPosition; i < FilledBytes; i++)
+                    {
+                        if (Buffer[i] != 0)
+                            continue;
+
+                        var result = encoding.GetString(Buffer, ReadPosition, i - ReadPosition);
+                        ReadPosition = i + 1;
+                        return result;
+                    }
+
+                    ensure += i;
+                }
+            }
+        }
+
         public ReadOnlySpan<byte> GetNullTerminatedBytes()
         {
             int i;

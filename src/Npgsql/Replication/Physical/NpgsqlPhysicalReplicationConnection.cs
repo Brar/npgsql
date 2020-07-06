@@ -1,18 +1,12 @@
 using System;
-using System.Diagnostics;
-using System.Net.Security;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Npgsql.Logging;
-using Npgsql.Util;
+#pragma warning disable 1591
 
-namespace Npgsql.Replication
+namespace Npgsql.Replication.Physical
 {
-    /// <summary>
-    ///
-    /// </summary>
     public sealed class NpgsqlPhysicalReplicationConnection : NpgsqlReplicationConnection
     {
         static readonly NpgsqlLogger Log = NpgsqlLogManager.CreateLogger(nameof(NpgsqlPhysicalReplicationConnection));
@@ -79,32 +73,4 @@ namespace Npgsql.Replication
 
         #endregion Replication commands
     }
-
-    #region Support types
-
-    /// <summary>
-    /// Contains information about a newly-created physical replication slot.
-    /// </summary>
-    [PublicAPI]
-    public readonly struct NpgsqlPhysicalReplicationSlotInfo
-    {
-        internal NpgsqlPhysicalReplicationSlotInfo(string slotName, string consistentPoint)
-        {
-            SlotName = slotName;
-            ConsistentPoint = consistentPoint;
-        }
-
-        /// <summary>
-        /// The name of the newly-created replication slot.
-        /// </summary>
-        public string SlotName { get; }
-
-        /// <summary>
-        /// The WAL location at which the slot became consistent.
-        /// This is the earliest location from which streaming can start on this replication slot.
-        /// </summary>
-        public string ConsistentPoint { get; }
-    }
-
-    #endregion Support types
 }

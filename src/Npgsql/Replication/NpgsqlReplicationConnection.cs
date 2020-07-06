@@ -5,12 +5,15 @@ using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Npgsql.BackendMessages;
 using Npgsql.Logging;
+using Npgsql.Replication.Logical;
 using static Npgsql.Util.Statics;
 
 namespace Npgsql.Replication
 {
     /// <summary>
-    ///
+    /// Defines the core behavior of replication connections and provides the base class for
+    /// <see cref="NpgsqlLogicalReplicationConnection"/> and
+    /// <see cref="Npgsql.Replication.Physical.NpgsqlPhysicalReplicationConnection"/>.
     /// </summary>
     public abstract class NpgsqlReplicationConnection : IDisposable, IAsyncDisposable
     {
@@ -28,7 +31,7 @@ namespace Npgsql.Replication
         /// <summary>
         /// Initializes a new instance of <see cref="NpgsqlReplicationConnection"/>.
         /// </summary>
-        protected NpgsqlReplicationConnection()
+        private protected NpgsqlReplicationConnection()
         {
             FeedbackTimer = new Timer(TimerSendFeedback);
         }
@@ -75,10 +78,7 @@ namespace Npgsql.Replication
 
         #endregion Properties
 
-        /// <summary>
-        ///
-        /// </summary>
-        protected async Task OpenAsync(NpgsqlConnectionStringBuilder settings, CancellationToken cancellationToken)
+        private protected async Task OpenAsync(NpgsqlConnectionStringBuilder settings, CancellationToken cancellationToken)
         {
             settings.Pooling = settings.Enlist = false;
             settings.ServerCompatibilityMode = ServerCompatibilityMode.NoTypeLoading;
@@ -135,6 +135,18 @@ namespace Npgsql.Replication
                 (int)results[1],
                 (string)results[2],
                 (string)results[3]);
+        }
+
+        /// <summary>
+        /// Requests the server to send over the timeline history file for timeline tli.
+        /// </summary>
+        /// <returns></returns>
+//        /// <exception cref="NotImplementedException"></exception>
+        public async Task<NpgsqlTimelineHistoryFile> TimelineHistory()
+        {
+            // ToDo: Implement
+            await Task.Delay(0);
+            throw new NotImplementedException();
         }
 
         /// <summary>
@@ -378,70 +390,4 @@ namespace Npgsql.Replication
             Disposed
         }
     }
-
-    #region Support types
-
-    /// <summary>
-    /// Contains server identification information returned from <see cref="NpgsqlReplicationConnection.IdentifySystem"/>.
-    /// </summary>
-    [PublicAPI]
-    public readonly struct NpgsqlReplicationIdentificationInfo
-    {
-        internal NpgsqlReplicationIdentificationInfo(
-            string systemId,
-            int timeline,
-            string xLogPos,
-            string dbName)
-        {
-            SystemId = systemId;
-            Timeline = timeline;
-            XLogPos = xLogPos;
-            DbName = dbName;
-        }
-
-        /// <summary>
-        /// The unique system identifier identifying the cluster.
-        /// This can be used to check that the base backup used to initialize the standby came from the same cluster.
-        /// </summary>
-        public string SystemId { get; }
-
-        /// <summary>
-        /// Current timeline ID. Also useful to check that the standby is consistent with the master.
-        /// </summary>
-        public int Timeline { get; }
-
-        /// <summary>
-        /// Current WAL flush location. Useful to get a known location in the write-ahead log where streaming can start.
-        /// </summary>
-        public string XLogPos { get; }
-
-        /// <summary>
-        /// Database connected to or null.
-        /// </summary>
-        public string DbName { get; }
-    }
-
-    /// <summary>
-    /// Contains the timeline history file for a timeline.
-    /// </summary>
-    public readonly struct NpgsqlTimelineHistoryFile
-    {
-        internal NpgsqlTimelineHistoryFile(string filename, string content)
-        {
-            Filename = filename;
-            Content = content;
-        }
-
-        /// <summary>
-        /// File name of the timeline history file, e.g., 00000002.history.
-        /// </summary>
-        public string Filename { get; }
-
-        /// <summary>
-        /// Contents of the timeline history file.
-        /// </summary>
-        public string Content { get; }
-    }
-
-    #endregion Support types
 }
