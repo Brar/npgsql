@@ -1,21 +1,14 @@
-﻿using JetBrains.Annotations;
-
-namespace Npgsql.Replication.Logical
+﻿namespace Npgsql.Replication.Internal
 {
     /// <summary>
     /// Contains information about a newly-created logical replication slot.
     /// </summary>
-    [PublicAPI]
-    public readonly struct NpgsqlLogicalReplicationSlotInfo
+    public readonly struct NpgsqlReplicationSlotInfo
     {
-        internal NpgsqlLogicalReplicationSlotInfo(
-            string slotName,
-            string consistentPoint,
-            string snapshotName,
-            string outputPlugin)
+        internal NpgsqlReplicationSlotInfo(string slotName, string consistentPoint, string snapshotName, string outputPlugin)
         {
             SlotName = slotName;
-            ConsistentPoint = consistentPoint;
+            ConsistentPoint = LogSequenceNumber.Parse(consistentPoint);
             SnapshotName = snapshotName;
             OutputPlugin = outputPlugin;
         }
@@ -29,7 +22,7 @@ namespace Npgsql.Replication.Logical
         /// The WAL location at which the slot became consistent.
         /// This is the earliest location from which streaming can start on this replication slot.
         /// </summary>
-        public string ConsistentPoint { get; }
+        public LogSequenceNumber ConsistentPoint { get; }
 
         /// <summary>
         /// The identifier of the snapshot exported by the command.

@@ -9,7 +9,7 @@ namespace Npgsql.Replication.Logical.Protocol
     /// See https://www.postgresql.org/docs/current/protocol-logicalrep-message-formats.html for details about the
     /// protocol.
     /// </remarks>
-    public abstract class LogicalReplicationProtocolMessage
+    public abstract class LogicalReplicationProtocolMessage : IXLogBaseData
     {
         private protected LogicalReplicationProtocolMessage(LogSequenceNumber walStart, LogSequenceNumber walEnd,
             DateTime serverClock)
@@ -19,19 +19,13 @@ namespace Npgsql.Replication.Logical.Protocol
             ServerClock = serverClock;
         }
 
-        /// <summary>
-        /// The starting point of the WAL data in this message.
-        /// </summary>
+        /// <inheritdoc />
         public LogSequenceNumber WalStart { get; }
 
-        /// <summary>
-        /// The current end of WAL on the server.
-        /// </summary>
+        /// <inheritdoc />
         public LogSequenceNumber WalEnd { get; }
 
-        /// <summary>
-        /// The server's system clock at the time of transmission, as microseconds since midnight on 2000-01-01.
-        /// </summary>
+        /// <inheritdoc />
         public DateTime ServerClock { get; }
     }
 }

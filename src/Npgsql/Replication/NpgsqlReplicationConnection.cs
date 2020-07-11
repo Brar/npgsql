@@ -1,11 +1,15 @@
 using System;
+using System.Collections.Generic;
 using System.Net.Security;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
 using Npgsql.BackendMessages;
 using Npgsql.Logging;
+using Npgsql.Replication.Internal;
 using Npgsql.Replication.Logical;
+using Npgsql.TypeHandlers.DateTimeHandlers;
 using static Npgsql.Util.Statics;
 
 namespace Npgsql.Replication
@@ -19,7 +23,7 @@ namespace Npgsql.Replication
     {
         #region Fields
 
-        private protected NpgsqlConnection Connection = default!;
+        internal NpgsqlConnection Connection = default!;
         private protected ReplicationConnectionState State { get; set; }
         private protected readonly Timer FeedbackTimer;
         private protected readonly SemaphoreSlim FeedbackSemaphore = new SemaphoreSlim(1, 1);
@@ -141,7 +145,6 @@ namespace Npgsql.Replication
         /// Requests the server to send over the timeline history file for timeline tli.
         /// </summary>
         /// <returns></returns>
-//        /// <exception cref="NotImplementedException"></exception>
         public async Task<NpgsqlTimelineHistoryFile> TimelineHistory()
         {
             // ToDo: Implement
@@ -156,6 +159,132 @@ namespace Npgsql.Replication
         [PublicAPI]
         public async Task<string> Show(string parameterName)
             => (string)(await ReadSingleRow("SHOW " + parameterName))[0];
+
+        internal static readonly Version TemporaryReplicationSlotSupportedVersion = new Version(10, 0);
+
+        internal async Task<NpgsqlReplicationSlotInfo> CreateReplicationSlotInternal(string slotName,
+            bool temporary, string createCommandSuffix)
+        {
+            var sb = new StringBuilder("CREATE_REPLICATION_SLOT ").Append(slotName);
+            if (temporary)
+                sb.Append(" TEMPORARY");
+
+            sb.Append(createCommandSuffix);
+            try
+            {
+                var results = await ReadSingleRow(sb.ToString());
+                return new NpgsqlReplicationSlotInfo((string)results[0], (string)results[1], (string)results[2],
+                    (string)results[3]);
+            }
+            catch (PostgresException e)
+            {
+                if (Connection.PostgreSqlVersion < TemporaryReplicationSlotSupportedVersion && e.SqlState == "42601" /* syntax_error */)
+                {
+                    if (temporary)
+                        throw new ArgumentException($"Temporary replication slots were introduced in PostgreSQL {TemporaryReplicationSlotSupportedVersion.ToString(1)}. Using PostgreSQL version {Connection.PostgreSqlVersion.ToString(3)} you have to leave the {nameof(temporary)} argument as false.", nameof(temporary), e);
+                }
+                throw;
+            }
+        }
+
+        internal async Task<IAsyncEnumerable<XLogData>> StartReplication(string startReplicationCommandText, bool bypassingStream)
+        {
+            var connector = Connection.Connector!;
+            await connector.WriteQuery(startReplicationCommandText, true);
+            await connector.Flush(true);
+
+            var msg = await connector.ReadMessage(true);
+            switch (msg.Code)
+            {
+            case BackendMessageCode.CopyBothResponse:
+                State = ReplicationConnectionState.Streaming;
+                FeedbackTimer.Change(WalReceiverStatusInterval, Timeout.InfiniteTimeSpan);
+                break;
+            case BackendMessageCode.CompletedResponse:
+                // TODO: This can happen when the client requests streaming at exactly the end of an old timeline.
+                // TODO: Figure out how to communicate these different states to the user
+                throw new NotImplementedException();
+            default:
+                throw connector.UnexpectedMessageReceived(msg.Code);
+            }
+
+            return StartStreaming();
+
+            async IAsyncEnumerable<XLogData> StartStreaming()
+            {
+                var buf = connector.ReadBuffer;
+                NpgsqlReadBuffer.ColumnStream columnStream = new NpgsqlReadBuffer.ColumnStream(buf);
+
+                while (true)
+                {
+                    try
+                    {
+                        msg = await connector.ReadMessage(true);
+                    }
+                    catch (PostgresException e) when (e.SqlState == PostgresErrorCodes.QueryCanceled)
+                    {
+                        State = ReplicationConnectionState.Idle;
+                        yield break;
+                    }
+
+                    if (msg.Code != BackendMessageCode.CopyData)
+                        throw connector.UnexpectedMessageReceived(msg.Code);
+
+                    var messageLength = ((CopyDataMessage)msg).Length;
+                    await buf.EnsureAsync(1);
+                    var code = (char)buf.ReadByte();
+                    switch (code)
+                    {
+                    case 'w': // XLogData
+                    {
+                        await buf.EnsureAsync(24);
+                        var startLsn = buf.ReadUInt64();
+                        var endLsn = buf.ReadUInt64();
+                        var sendTime = TimestampHandler.Int64ToNpgsqlDateTime(buf.ReadInt64()).ToDateTime();
+
+                        if (LastReceivedLsn < startLsn)
+                            LastReceivedLsn = startLsn;
+                        if (LastReceivedLsn < endLsn)
+                            LastReceivedLsn = endLsn;
+
+                        // dataLen = msg.Length - (code = 1 + walStart = 8 + walEnd = 8 + serverClock = 8)
+                        var dataLen = messageLength - 25;
+                        columnStream.Init(dataLen, canSeek: false);
+                        var data = new XLogData(startLsn, endLsn, sendTime, columnStream);
+
+                        yield return data;
+
+                        // Our consumer may have disposed the stream which isn't necessary but shouldn't hurt us
+                        if (columnStream.IsDisposed)
+                            columnStream = new NpgsqlReadBuffer.ColumnStream(buf);
+                        // Our consumer may not have read the stream to the end, but it might as well have been us
+                        // ourselves bypassing the stream and reading directly from the buffer in StartReplication()
+                        else if (columnStream.Position < columnStream.Length && !bypassingStream)
+                            await buf.Skip(columnStream.Length - columnStream.Position, true);
+
+                        continue;
+                    }
+
+                    case 'k': // Primary keepalive message
+                    {
+                        await buf.EnsureAsync(17);
+                        var endLsn = buf.ReadUInt64();
+                        var timestamp = buf.ReadInt64();
+                        var replyRequested = buf.ReadByte() == 1;
+                        if (LastReceivedLsn < endLsn)
+                            LastReceivedLsn = endLsn;
+                        if (replyRequested && await FeedbackSemaphore.WaitAsync(Timeout.Infinite))
+                            await SendFeedback();
+
+                        continue;
+                    }
+
+                    default:
+                        throw connector.Break(new NpgsqlException($"Unknown replication message code '{code}'"));
+                    }
+                }
+            }
+        }
 
         /// <summary>
         /// Drops a replication slot, freeing any reserved server-side resources.

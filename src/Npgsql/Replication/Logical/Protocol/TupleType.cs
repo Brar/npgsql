@@ -1,4 +1,4 @@
-﻿namespace Npgsql.Replication.Logical
+﻿namespace Npgsql.Replication.Logical.Protocol
 {
     enum TupleType : byte
     {

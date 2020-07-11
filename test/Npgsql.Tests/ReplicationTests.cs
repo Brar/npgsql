@@ -1,12 +1,9 @@
 using System;
-using System.IO;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Npgsql.Replication;
 using Npgsql.Replication.Logical;
-using Npgsql.Replication.Logical.Protocol;
 using NUnit.Framework;
+using Npgsql.Replication.Logical.Protocol;
 
 namespace Npgsql.Tests
 {
@@ -18,7 +15,7 @@ namespace Npgsql.Tests
             SafeTest(nameof(ReplicationSurvivesPausesLongerThanWalSenderTimeout), async (slotName) =>
             {
                 await using var conn = OpenConnection();
-                TestUtil.MinimumPgVersion(conn, "9.4", "Logical Replication was introduced in PostgreSQL 9.4");
+                TestUtil.MinimumPgVersion(conn, "10.0", "The SHOW command, which is required to run this test was added to the Streaming Replication Protocol in PostgreSQL 10");
                 await using var replConn = new NpgsqlLogicalReplicationConnection(new NpgsqlConnectionStringBuilder(ConnectionString)
                 {
                     ApplicationName = slotName
@@ -34,10 +31,9 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
                 var walReceiverStatusInterval = TimeSpan.FromTicks(walSenderTimeout.Ticks / 2L);
                 Console.WriteLine($"Setting {nameof(NpgsqlLogicalReplicationConnection)}.{nameof(NpgsqlLogicalReplicationConnection.WalReceiverStatusInterval)} to {walReceiverStatusInterval}");
                 replConn.WalReceiverStatusInterval = walReceiverStatusInterval;
-                var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding");
+                var slot = await Replication.Logical.TestDecoding.NpgsqlLogicalReplicationConnectionExtensions.CreateReplicationSlot(replConn, slotName);
                 await conn.ExecuteNonQueryAsync("INSERT INTO logical_replication (name) VALUES ('val1')");
-                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
-                    .GetAsyncEnumerator();
+                await using var enumerator = (await slot.StartReplication()).GetAsyncEnumerator();
 
                 var delay = TimeSpan.FromTicks(checked(walSenderTimeout.Ticks * 2L));
                 Console.WriteLine($"Going to sleep for {delay}");
@@ -72,9 +68,8 @@ DROP TABLE IF EXISTS logical_replication;
 CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
 ");
 
-                var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding");
-                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
-                    .GetAsyncEnumerator();
+                var slot = await Replication.Logical.TestDecoding.NpgsqlLogicalReplicationConnectionExtensions.CreateReplicationSlot(replConn, slotName);
+                await using var enumerator = (await slot.StartReplication()).GetAsyncEnumerator();
 
                 // We need to start a separate thread here as the insert command wil not complete until
                 // the transaction successfully completes (which we block here from the standby side) and by that
@@ -88,12 +83,12 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
                     await insertConn.ExecuteNonQueryAsync("INSERT INTO logical_replication (name) VALUES ('val1')");
                 });
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("BEGIN "));
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                Assert.That(enumerator.Current.Data,
                     Is.EqualTo("table public.logical_replication: INSERT: id[integer]:1 name[text]:'val1'"));
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("COMMIT "));
 
                 var result = await conn.ExecuteScalarAsync("SELECT name FROM logical_replication ORDER BY id DESC LIMIT 1;");
                 Assert.That(result, Is.Null); // Not committed yet because we didn't report fsync yet
@@ -126,12 +121,12 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
                     await insertConn.ExecuteNonQueryAsync("INSERT INTO logical_replication (name) VALUES ('val2')");
                 });
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("BEGIN "));
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                Assert.That(enumerator.Current.Data,
                     Is.EqualTo("table public.logical_replication: INSERT: id[integer]:2 name[text]:'val2'"));
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("COMMIT "));
 
                 result = await conn.ExecuteScalarAsync("SELECT name FROM logical_replication ORDER BY id DESC LIMIT 1;");
                 Assert.That(result, Is.EqualTo("val1")); // Not committed yet because we didn't report apply yet
@@ -158,12 +153,12 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
                     await insertConn.ExecuteNonQueryAsync("INSERT INTO logical_replication (name) VALUES ('val3')");
                 });
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("BEGIN "));
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                Assert.That(enumerator.Current.Data,
                     Is.EqualTo("table public.logical_replication: INSERT: id[integer]:3 name[text]:'val3'"));
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("COMMIT "));
 
                 result = await conn.ExecuteScalarAsync("SELECT name FROM logical_replication ORDER BY id DESC LIMIT 1;");
                 Assert.That(result, Is.EqualTo("val2")); // Not committed yet because we didn't report receive yet
@@ -195,31 +190,31 @@ DROP TABLE IF EXISTS logical_replication;
 CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
 ");
                 await replConn.OpenAsync();
-                var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding");
+                var slot = await Replication.Logical.TestDecoding.NpgsqlLogicalReplicationConnectionExtensions
+                    .CreateReplicationSlot(replConn, slotName);
                 await conn.ExecuteNonQueryAsync("INSERT INTO logical_replication (name) VALUES ('val1'), ('val2')");
 
 
-                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
-                    .GetAsyncEnumerator();
+                await using var enumerator = (await slot.StartReplication()).GetAsyncEnumerator();
 
 
                 // Begin Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("BEGIN "));
 
                 // Insert first value
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                Assert.That(enumerator.Current.Data,
                     Is.EqualTo("table public.logical_replication: INSERT: id[integer]:1 name[text]:'val1'"));
 
                 // Insert second value
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                Assert.That(enumerator.Current.Data,
                     Is.EqualTo("table public.logical_replication: INSERT: id[integer]:2 name[text]:'val2'"));
 
                 // Commit Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("COMMIT "));
             });
 
         [Test(Description = "Tests whether UPDATE commands get replicated via test_decoding plugin for tables using the default replica identity"), NonParallelizable]
@@ -235,26 +230,26 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
 INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
 ");
                 await replConn.OpenAsync();
-                var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding");
+                var slot = await Replication.Logical.TestDecoding.NpgsqlLogicalReplicationConnectionExtensions
+                    .CreateReplicationSlot(replConn, slotName);
                 await conn.ExecuteNonQueryAsync("UPDATE logical_replication SET name='val1' WHERE name='val'");
 
 
-                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
-                    .GetAsyncEnumerator();
+                await using var enumerator = (await slot.StartReplication()).GetAsyncEnumerator();
 
 
                 // Begin Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("BEGIN "));
 
                 // Update
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                Assert.That(enumerator.Current.Data,
                     Is.EqualTo("table public.logical_replication: UPDATE: id[integer]:1 name[text]:'val1'"));
 
                 // Commit Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("COMMIT "));
             });
 
         [Test(Description = "Tests whether UPDATE commands get replicated via test_decoding plugin for tables using an index as replica identity"), NonParallelizable]
@@ -272,26 +267,26 @@ ALTER TABLE logical_replication REPLICA IDENTITY USING INDEX idx_logical_replica
 INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
 ");
                 await replConn.OpenAsync();
-                var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding");
+                var slot = await Replication.Logical.TestDecoding.NpgsqlLogicalReplicationConnectionExtensions
+                    .CreateReplicationSlot(replConn, slotName);
                 await conn.ExecuteNonQueryAsync("UPDATE logical_replication SET name='val1' WHERE name='val'");
 
 
-                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
-                    .GetAsyncEnumerator();
+                await using var enumerator = (await slot.StartReplication()).GetAsyncEnumerator();
 
 
                 // Begin Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("BEGIN "));
 
                 // Update
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                Assert.That(enumerator.Current.Data,
                     Is.EqualTo("table public.logical_replication: UPDATE: old-key: name[text]:'val' new-tuple: id[integer]:1 name[text]:'val1'"));
 
                 // Commit Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("COMMIT "));
             });
 
         [Test(Description = "Tests whether UPDATE commands get replicated via test_decoding plugin for tables using full replica identity"), NonParallelizable]
@@ -308,26 +303,26 @@ ALTER TABLE logical_replication REPLICA IDENTITY FULL;
 INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
 ");
                 await replConn.OpenAsync();
-                var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding");
+                var slot = await Replication.Logical.TestDecoding.NpgsqlLogicalReplicationConnectionExtensions
+                    .CreateReplicationSlot(replConn, slotName);
                 await conn.ExecuteNonQueryAsync("UPDATE logical_replication SET name='val1' WHERE name='val'");
 
 
-                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
-                    .GetAsyncEnumerator();
+                await using var enumerator = (await slot.StartReplication()).GetAsyncEnumerator();
 
 
                 // Begin Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("BEGIN "));
 
                 // Update
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                Assert.That(enumerator.Current.Data,
                     Is.EqualTo("table public.logical_replication: UPDATE: old-key: id[integer]:1 name[text]:'val' new-tuple: id[integer]:1 name[text]:'val1'"));
 
                 // Commit Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("COMMIT "));
             });
 
         [Test(Description = "Tests whether DELETE commands get replicated via test_decoding plugin for tables using the default replica identity"), NonParallelizable]
@@ -343,26 +338,26 @@ CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
 INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
 ");
                 await replConn.OpenAsync();
-                var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding");
+                var slot = await Replication.Logical.TestDecoding.NpgsqlLogicalReplicationConnectionExtensions
+                    .CreateReplicationSlot(replConn, slotName);
                 await conn.ExecuteNonQueryAsync("DELETE FROM logical_replication WHERE name='val2'");
 
 
-                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
-                    .GetAsyncEnumerator();
+                await using var enumerator = (await slot.StartReplication()).GetAsyncEnumerator();
 
 
                 // Begin Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("BEGIN "));
 
                 // Delete
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                Assert.That(enumerator.Current.Data,
                     Is.EqualTo("table public.logical_replication: DELETE: id[integer]:2"));
 
                 // Commit Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("COMMIT "));
             });
 
         [Test(Description = "Tests whether DELETE commands get replicated via test_decoding plugin for tables using an index as replica identity"), NonParallelizable]
@@ -380,26 +375,26 @@ ALTER TABLE logical_replication REPLICA IDENTITY USING INDEX idx_logical_replica
 INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
 ");
                 await replConn.OpenAsync();
-                var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding");
+                var slot = await Replication.Logical.TestDecoding.NpgsqlLogicalReplicationConnectionExtensions
+                    .CreateReplicationSlot(replConn, slotName);
                 await conn.ExecuteNonQueryAsync("DELETE FROM logical_replication WHERE name='val2'");
 
 
-                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
-                    .GetAsyncEnumerator();
+                await using var enumerator = (await slot.StartReplication()).GetAsyncEnumerator();
 
 
                 // Begin Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("BEGIN "));
 
                 // Delete
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                Assert.That(enumerator.Current.Data,
                     Is.EqualTo("table public.logical_replication: DELETE: name[text]:'val2'"));
 
                 // Commit Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("COMMIT "));
             });
 
         [Test(Description = "Tests whether DELETE commands get replicated via test_decoding plugin for tables using full replica identity"), NonParallelizable]
@@ -416,26 +411,26 @@ ALTER TABLE logical_replication REPLICA IDENTITY FULL;
 INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
 ");
                 await replConn.OpenAsync();
-                var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding");
+                var slot = await Replication.Logical.TestDecoding.NpgsqlLogicalReplicationConnectionExtensions
+                    .CreateReplicationSlot(replConn, slotName);
                 await conn.ExecuteNonQueryAsync("DELETE FROM logical_replication WHERE name='val2'");
 
 
-                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
-                    .GetAsyncEnumerator();
+                await using var enumerator = (await slot.StartReplication()).GetAsyncEnumerator();
 
 
                 // Begin Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("BEGIN "));
 
                 // Delete
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                Assert.That(enumerator.Current.Data,
                     Is.EqualTo("table public.logical_replication: DELETE: id[integer]:2 name[text]:'val2'"));
 
                 // Commit Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("COMMIT "));
             });
 
         [Test(Description = "Tests whether TRUNCATE commands get replicated via test_decoding plugin"), NonParallelizable]
@@ -450,26 +445,26 @@ DROP TABLE IF EXISTS logical_replication;
 CREATE TABLE logical_replication (id serial PRIMARY KEY, name TEXT NOT NULL);
 ");
                 await replConn.OpenAsync();
-                var slot = await replConn.CreateReplicationSlot(slotName, "test_decoding", true);
+                var slot = await Replication.Logical.TestDecoding.NpgsqlLogicalReplicationConnectionExtensions
+                    .CreateReplicationSlot(replConn, slotName);
                 await conn.ExecuteNonQueryAsync("TRUNCATE TABLE logical_replication RESTART IDENTITY CASCADE");
 
 
-                await using var enumerator = (await replConn.StartReplicationStream(slot.SlotName, slot.ConsistentPoint))
-                    .GetAsyncEnumerator();
+                await using var enumerator = (await slot.StartReplication()).GetAsyncEnumerator();
 
 
                 // Begin Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("BEGIN "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("BEGIN "));
 
                 // Truncate
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data),
+                Assert.That(enumerator.Current.Data,
                     Is.EqualTo("table public.logical_replication: TRUNCATE: restart_seqs cascade"));
 
                 // Commit Transaction
                 Assert.That(await enumerator.MoveNextAsync(), Is.True);
-                Assert.That(await ReadAllAsString(enumerator.Current.Data), Does.StartWith("COMMIT "));
+                Assert.That(enumerator.Current.Data, Does.StartWith("COMMIT "));
             });
 
         #endregion test_decoding (consuming XlogData.Data as raw stream)
@@ -489,11 +484,12 @@ CREATE TABLE logical_replication (id INT PRIMARY KEY GENERATED ALWAYS AS IDENTIT
 CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
 ");
             await replConn.OpenAsync();
-            var slot = await replConn.CreateReplicationSlot(nameof(StartReplicationReplicatesInsert), isTemporary: true);
+            var slot = await Replication.Logical.Protocol.NpgsqlLogicalReplicationConnectionExtensions
+                .CreateReplicationSlot(replConn, nameof(StartReplicationReplicatesInsert), true);
             await conn.ExecuteNonQueryAsync("INSERT INTO logical_replication (name) VALUES ('val1'), ('val2')");
 
 
-            await using var enumerator = replConn.StartReplication(slot.SlotName, slot.ConsistentPoint, "npgsql_test_publication").GetAsyncEnumerator();
+            await using var enumerator = (await slot.StartReplication("npgsql_test_publication")).GetAsyncEnumerator();
 
 
             // Begin Transaction
@@ -546,11 +542,12 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
 CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
 ");
             await replConn.OpenAsync();
-            var slot = await replConn.CreateReplicationSlot(nameof(StartReplicationReplicatesUpdateForDefaultReplicaIdentity), isTemporary: true);
+            var slot = await Replication.Logical.Protocol.NpgsqlLogicalReplicationConnectionExtensions
+                .CreateReplicationSlot(replConn, nameof(StartReplicationReplicatesUpdateForDefaultReplicaIdentity), true);
             await conn.ExecuteNonQueryAsync("UPDATE logical_replication SET name='val1' WHERE name='val'");
 
 
-            await using var enumerator = replConn.StartReplication(slot.SlotName, slot.ConsistentPoint, "npgsql_test_publication").GetAsyncEnumerator();
+            await using var enumerator = (await slot.StartReplication("npgsql_test_publication")).GetAsyncEnumerator();
 
 
             // Begin Transaction
@@ -597,11 +594,12 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
 CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
 ");
             await replConn.OpenAsync();
-            var slot = await replConn.CreateReplicationSlot(nameof(StartReplicationReplicatesUpdateForIndexReplicaIdentity), isTemporary: true);
+            var slot = await Replication.Logical.Protocol.NpgsqlLogicalReplicationConnectionExtensions
+                .CreateReplicationSlot(replConn, nameof(StartReplicationReplicatesUpdateForIndexReplicaIdentity), true);
             await conn.ExecuteNonQueryAsync("UPDATE logical_replication SET name='val1' WHERE name='val'");
 
 
-            await using var enumerator = replConn.StartReplication(slot.SlotName, slot.ConsistentPoint, "npgsql_test_publication").GetAsyncEnumerator();
+            await using var enumerator = (await slot.StartReplication("npgsql_test_publication")).GetAsyncEnumerator();
 
 
             // Begin Transaction
@@ -650,11 +648,12 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
 CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
 ");
             await replConn.OpenAsync();
-            var slot = await replConn.CreateReplicationSlot(nameof(StartReplicationReplicatesUpdateForFullReplicaIdentity), isTemporary: true);
+            var slot = await Replication.Logical.Protocol.NpgsqlLogicalReplicationConnectionExtensions
+                .CreateReplicationSlot(replConn, nameof(StartReplicationReplicatesUpdateForFullReplicaIdentity), true);
             await conn.ExecuteNonQueryAsync("UPDATE logical_replication SET name='val1' WHERE name='val'");
 
 
-            await using var enumerator = replConn.StartReplication(slot.SlotName, slot.ConsistentPoint, "npgsql_test_publication").GetAsyncEnumerator();
+            await using var enumerator = (await slot.StartReplication("npgsql_test_publication")).GetAsyncEnumerator();
 
 
             // Begin Transaction
@@ -702,11 +701,12 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
 CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
 ");
             await replConn.OpenAsync();
-            var slot = await replConn.CreateReplicationSlot(nameof(StartReplicationReplicatesDeleteForDefaultReplicaIdentity), isTemporary: true);
+            var slot = await NpgsqlLogicalReplicationConnectionExtensions.CreateReplicationSlot(replConn,
+                nameof(StartReplicationReplicatesDeleteForDefaultReplicaIdentity), true);
             await conn.ExecuteNonQueryAsync("DELETE FROM logical_replication WHERE name='val2'");
 
 
-            await using var enumerator = replConn.StartReplication(slot.SlotName, slot.ConsistentPoint, "npgsql_test_publication").GetAsyncEnumerator();
+            await using var enumerator = (await slot.StartReplication("npgsql_test_publication")).GetAsyncEnumerator();
 
 
             // Begin Transaction
@@ -753,11 +753,12 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
 CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
 ");
             await replConn.OpenAsync();
-            var slot = await replConn.CreateReplicationSlot(nameof(StartReplicationReplicatesDeleteForIndexReplicaIdentity), isTemporary: true);
+            var slot = await Replication.Logical.Protocol.NpgsqlLogicalReplicationConnectionExtensions
+                .CreateReplicationSlot(replConn, nameof(StartReplicationReplicatesDeleteForIndexReplicaIdentity), true);
             await conn.ExecuteNonQueryAsync("DELETE FROM logical_replication WHERE name='val2'");
 
 
-            await using var enumerator = replConn.StartReplication(slot.SlotName, slot.ConsistentPoint, "npgsql_test_publication").GetAsyncEnumerator();
+            await using var enumerator = (await slot.StartReplication("npgsql_test_publication")).GetAsyncEnumerator();
 
 
             // Begin Transaction
@@ -803,11 +804,12 @@ INSERT INTO logical_replication (name) VALUES ('val'), ('val2');
 CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
 ");
             await replConn.OpenAsync();
-            var slot = await replConn.CreateReplicationSlot(nameof(StartReplicationReplicatesDeleteForFullReplicaIdentity), isTemporary: true);
+            var slot = await Replication.Logical.Protocol.NpgsqlLogicalReplicationConnectionExtensions
+                .CreateReplicationSlot(replConn, nameof(StartReplicationReplicatesDeleteForFullReplicaIdentity), true);
             await conn.ExecuteNonQueryAsync("DELETE FROM logical_replication WHERE name='val2'");
 
 
-            await using var enumerator = replConn.StartReplication(slot.SlotName, slot.ConsistentPoint, "npgsql_test_publication").GetAsyncEnumerator();
+            await using var enumerator = (await slot.StartReplication("npgsql_test_publication")).GetAsyncEnumerator();
 
 
             // Begin Transaction
@@ -852,11 +854,12 @@ INSERT INTO logical_replication (name) VALUES ('val1'), ('val2');
 CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
 ");
             await replConn.OpenAsync();
-            var slot = await replConn.CreateReplicationSlot(nameof(StartReplicationReplicatesInsert), isTemporary: true);
+            var slot = await Replication.Logical.Protocol.NpgsqlLogicalReplicationConnectionExtensions
+                .CreateReplicationSlot(replConn, nameof(StartReplicationReplicatesTruncate), true);
             await conn.ExecuteNonQueryAsync("TRUNCATE TABLE logical_replication RESTART IDENTITY CASCADE");
 
 
-            await using var enumerator = replConn.StartReplication(slot.SlotName, slot.ConsistentPoint, "npgsql_test_publication").GetAsyncEnumerator();
+            await using var enumerator = (await slot.StartReplication("npgsql_test_publication")).GetAsyncEnumerator();
 
 
             // Begin Transaction
@@ -916,7 +919,8 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
         {
             await using var conn = new NpgsqlLogicalReplicationConnection(ConnectionString);
             await conn.OpenAsync();
-            var slot = await conn.CreateReplicationSlot(nameof(CreateDropLogicalSlot), "test_decoding");
+            var slot = await Replication.Logical.TestDecoding.NpgsqlLogicalReplicationConnectionExtensions
+                .CreateReplicationSlot(conn, nameof(CreateDropLogicalSlot));
             await conn.DropReplicationSlot(slot.SlotName);
         }
 
@@ -936,7 +940,8 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
             var ex = Assert.ThrowsAsync<ArgumentException>(async () =>
             {
                 // ReSharper disable once AccessToDisposedClosure
-                await replConn.CreateReplicationSlot(nameof(IsTemporaryThrowsForOldBackends), "test_decoding", true);
+                await Replication.Logical.TestDecoding.NpgsqlLogicalReplicationConnectionExtensions
+                    .CreateReplicationSlot(replConn, nameof(IsTemporaryThrowsForOldBackends), true);
             });
             Assert.That(ex.Message, Does.StartWith("Temporary replication slots were introduced in PostgreSQL 10."));
             Assert.That(ex.InnerException, Is.TypeOf<PostgresException>());
@@ -960,7 +965,8 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
             var ex = Assert.ThrowsAsync<ArgumentException>(async () =>
             {
                 // ReSharper disable once AccessToDisposedClosure
-                await replConn.CreateReplicationSlot(nameof(NonDefaultSlotSnapshotInitModeThrowsForOldBackends), "test_decoding", slotSnapshotInitMode: mode);
+                await Replication.Logical.TestDecoding.NpgsqlLogicalReplicationConnectionExtensions
+                    .CreateReplicationSlot(replConn, nameof(NonDefaultSlotSnapshotInitModeThrowsForOldBackends), slotSnapshotInitMode: mode);
             });
             Assert.That(ex.Message, Does.StartWith("The USE_SNAPSHOT and NOEXPORT_SNAPSHOT syntax was introduced in PostgreSQL 10."));
             Assert.That(ex.InnerException, Is.TypeOf<PostgresException>());
@@ -981,13 +987,6 @@ CREATE PUBLICATION npgsql_test_publication FOR TABLE logical_replication;
             var walLevel = (string)await conn.ExecuteScalarAsync("SHOW wal_level");
             if (walLevel != "logical")
                 TestUtil.IgnoreExceptOnBuildServer("wal_level needs to be set to 'logical' in the PostgreSQL conf");
-        }
-
-        static async Task<string> ReadAllAsString(Stream stream)
-        {
-            var memoryStream = new MemoryStream();
-            await stream.CopyToAsync(memoryStream);
-            return Encoding.UTF8.GetString(memoryStream.ToArray());
         }
 
         static TimeSpan ParseTimespan(string str)

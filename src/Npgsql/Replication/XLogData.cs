@@ -8,13 +8,9 @@ namespace Npgsql.Replication
     /// A message representing a section of the WAL data stream.
     /// </summary>
     [PublicAPI]
-    public readonly struct XLogData
+    public readonly struct XLogData : IXLogBaseData
     {
-        internal XLogData(
-            LogSequenceNumber walStart,
-            LogSequenceNumber walEnd,
-            DateTime serverClock,
-            Stream data)
+        internal XLogData(LogSequenceNumber walStart, LogSequenceNumber walEnd, DateTime serverClock, Stream data)
         {
             WalStart = walStart;
             WalEnd = walEnd;
@@ -22,19 +18,13 @@ namespace Npgsql.Replication
             Data = data;
         }
 
-        /// <summary>
-        /// The starting point of the WAL data in this message.
-        /// </summary>
+        /// <inheritdoc />
         public LogSequenceNumber WalStart { get; }
 
-        /// <summary>
-        /// The current end of WAL on the server.
-        /// </summary>
+        /// <inheritdoc />
         public LogSequenceNumber WalEnd { get; }
 
-        /// <summary>
-        /// The server's system clock at the time of transmission.
-        /// </summary>
+        /// <inheritdoc />
         public DateTime ServerClock { get; }
 
         /// <summary>

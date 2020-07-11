@@ -1,8 +1,7 @@
-﻿namespace Npgsql.Replication.Logical
+﻿namespace Npgsql.Replication.Logical.Protocol
 {
     enum BackendReplicationMessageCode : byte
     {
-        Invalid = 0,
         Begin = (byte)'B',
         Commit = (byte)'C',
         Origin = (byte)'O',
