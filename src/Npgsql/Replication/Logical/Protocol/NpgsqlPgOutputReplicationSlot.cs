@@ -286,6 +286,16 @@ namespace Npgsql.Replication.Logical.Protocol
 
         }
 
+        /// <inheritdoc />
+        /// <remarks>
+        /// This overload is not supported by <see cref="NpgsqlPgOutputReplicationSlot"/>. You have to specify at least
+        /// one publication name.
+        /// </remarks>
+        public override Task<IAsyncEnumerable<LogicalReplicationProtocolMessage>> StartReplication(
+            LogSequenceNumber? walLocation = null)
+            => throw new NotSupportedException(
+                $"This overload is not supported by {nameof(NpgsqlPgOutputReplicationSlot)}. You have to specify at least one publication name.");
+
         static string? FormatPublicationNames(IEnumerable<string> publicationNames)
         {
             using var enumerator = publicationNames.GetEnumerator();

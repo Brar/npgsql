@@ -53,6 +53,5 @@ namespace Npgsql.Replication.Logical.Internal
                 throw;
             }
         }
-
     }
 }

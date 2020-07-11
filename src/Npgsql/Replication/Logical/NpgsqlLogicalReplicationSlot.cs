@@ -9,8 +9,9 @@ namespace Npgsql.Replication.Logical
     /// <summary>
     /// Provides the base class for all classes wrapping a PostgreSQL logical replication slot.
     /// </summary>
+    /// <typeparam name="T"></typeparam>
     [PublicAPI]
-    public abstract class NpgsqlLogicalReplicationSlot<T> : NpgsqlReplicationSlot where T : IXLogBaseData
+    public abstract class NpgsqlLogicalReplicationSlot<T> : NpgsqlReplicationSlot<T> where T : IXLogBaseData
     {
         /// <summary>
         /// Initializes a new instance of <see cref="NpgsqlLogicalReplicationSlot{T}"/>.
