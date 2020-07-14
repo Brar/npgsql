@@ -1,6 +1,6 @@
 ﻿using System.Threading.Tasks;
 using JetBrains.Annotations;
-using Npgsql.Replication.Logical.Internal;
+using Npgsql.Replication.Internal;
 
 namespace Npgsql.Replication.Logical.TestDecoding
 {
@@ -13,7 +13,7 @@ namespace Npgsql.Replication.Logical.TestDecoding
     {
         /// <summary>
         /// Creates a <see cref="NpgsqlTestDecodingReplicationSlot"/> that wraps a replication slot using the
-        /// "test_decoding" plugin and can be used to start streaming replication using
+        /// "test_decoding" logical decoding plugin and can be used to start streaming replication using
         /// <see cref="NpgsqlTestDecodingData"/> messages.
         /// </summary>
         /// <param name="connection">The <see cref="NpgsqlLogicalReplicationConnection"/> to use for creating the

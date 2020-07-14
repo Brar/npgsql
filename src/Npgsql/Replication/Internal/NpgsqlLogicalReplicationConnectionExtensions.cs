@@ -1,10 +1,9 @@
 ﻿using System;
 using System.Text;
 using System.Threading.Tasks;
-using JetBrains.Annotations;
-using Npgsql.Replication.Internal;
+using Npgsql.Replication.Logical;
 
-namespace Npgsql.Replication.Logical.Internal
+namespace Npgsql.Replication.Internal
 {
     /// <summary>
     /// This API is for internal use and for implementing logical replication plugins.

@@ -9,9 +9,9 @@ namespace Npgsql.Replication.Logical
     /// <summary>
     /// Provides the base class for all classes wrapping a PostgreSQL logical replication slot.
     /// </summary>
-    /// <typeparam name="T"></typeparam>
+    /// <typeparam name="TStream"></typeparam>
     [PublicAPI]
-    public abstract class NpgsqlLogicalReplicationSlot<T> : NpgsqlReplicationSlot<T> where T : IXLogBaseData
+    public abstract class NpgsqlLogicalReplicationSlot<TStream> : NpgsqlReplicationSlot<NpgsqlLogicalReplicationConnection, TStream> where TStream : IXLogBaseData
     {
         /// <summary>
         /// Initializes a new instance of <see cref="NpgsqlLogicalReplicationSlot{T}"/>.
@@ -23,7 +23,7 @@ namespace Npgsql.Replication.Logical
         /// until a new command is executed on this connection or the replication connection is closed.</param>
         /// <param name="outputPlugin">The name of the output plugin used by the replication slot.</param>
         [PublicAPI]
-        protected NpgsqlLogicalReplicationSlot(NpgsqlReplicationConnection connection, string slotName,
+        protected NpgsqlLogicalReplicationSlot(NpgsqlLogicalReplicationConnection connection, string slotName,
             LogSequenceNumber consistentPoint, string snapshotName, string outputPlugin) : base(connection, slotName,
             consistentPoint)
         {

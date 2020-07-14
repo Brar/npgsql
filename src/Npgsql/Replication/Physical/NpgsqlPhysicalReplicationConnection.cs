@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
@@ -26,32 +28,37 @@ namespace Npgsql.Replication.Physical
         #region Replication commands
 
         /// <summary>
-        /// Create a physical replication slot.
+        /// Creates a <see cref="NpgsqlPhysicalReplicationSlot"/> that wraps a PostgreSQL physical replication slot and
+        /// can be used to start physical streaming replication
         /// </summary>
         /// <param name="slotName">
         /// The name of the slot to create. Must be a valid replication slot name
         /// (see <a href="https://www.postgresql.org/docs/current/warm-standby.html#STREAMING-REPLICATION-SLOTS-MANIPULATION">Section 26.2.6.1</a>).
         /// </param>
-        /// <param name="isTemporary">
-        /// Specify that this replication slot is a temporary one.
-        /// Temporary slots are not saved to disk and are automatically dropped on error or when the session has finished.
-        /// </param>
+        /// <param name="temporary"><see langword="true"/> if this replication slot shall be temporary one; otherwise
+        /// <see langword="false"/>. Temporary slots are not saved to disk and are automatically dropped on error or
+        /// when the session has finished.</param>
         /// <param name="reserveWal">
-        /// Specify that this physical replication slot reserves WAL immediately.
-        /// Otherwise, WAL is only reserved upon connection from a streaming replication client.
+        /// If this is set to <see langword="true"/> this physical replication slot reserves WAL immediately. Otherwise,
+        /// WAL is only reserved upon connection from a streaming replication client.
         /// </param>
-        /// <returns>
-        /// An <see cref="NpgsqlPhysicalReplicationSlotInfo"/> providing information on the newly-created slot.
+        /// <returns>A <see cref="NpgsqlPhysicalReplicationSlot"/> that wraps the newly-created replication slot.
         /// </returns>
-        /// <remarks>
-        /// See https://www.postgresql.org/docs/current/warm-standby.html#STREAMING-REPLICATION-SLOTS.
-        /// </remarks>
         [PublicAPI]
-        public Task<NpgsqlPhysicalReplicationSlotInfo> CreateReplicationSlot(
+        public async Task<NpgsqlPhysicalReplicationSlot> CreateReplicationSlot(
             string slotName,
-            bool isTemporary,
+            bool temporary,
             bool reserveWal)
-            => throw new NotImplementedException();
+        {
+            var sb = new StringBuilder(" PHYSICAL");
+
+            if (reserveWal)
+                sb.Append(" RESERVE_WAL");
+
+            var slotInfo = await CreateReplicationSlotInternal(slotName, temporary, sb.ToString());
+
+            return new NpgsqlPhysicalReplicationSlot(this, slotInfo.SlotName, slotInfo.ConsistentPoint);
+        }
 
         // TODO: Default for timeline -1?
         /// <summary>
@@ -60,16 +67,37 @@ namespace Npgsql.Replication.Physical
         /// <param name="walLocation">
         /// The WAL location from which to start streaming, in the format XXX/XXX.
         /// </param>
-        /// <param name="slotName">
-        /// If a slot's name is provided, it will be updated as replication progresses so that the server knows which
-        /// WAL segments, and if hot_standby_feedback is on which transactions, are still needed by the standby.
-        /// </param>
         /// <param name="timeline">
         /// If specified, streaming starts on that timeline; otherwise, the server's current timeline is selected.
         /// </param>
         [PublicAPI]
-        public Task StartReplication(string walLocation, string? slotName = null, int timeline = -1)
+        public Task<IAsyncEnumerable<XLogData>> StartReplication(LogSequenceNumber? walLocation = null,
+            string? timeline = null)
             => throw new NotImplementedException();
+
+        // ToDo: Investigate if there's a better representation for timeline than string.
+        internal async Task<IAsyncEnumerable<XLogData>> StartReplicationInternal(LogSequenceNumber walLocation,
+            string? slotName, string? timeline)
+        {
+            var sb = new StringBuilder("START_REPLICATION");
+
+            if (slotName != null)
+                sb.Append(" SLOT ").Append(slotName);
+
+            sb.Append(" PHYSICAL ").Append(walLocation.ToString());
+
+            if (timeline != null)
+                sb.Append(' ').Append(timeline);
+
+            var stream = await base.StartReplication(sb.ToString(), false);
+            return StartStreaming(stream);
+
+            async IAsyncEnumerable<XLogData> StartStreaming(IAsyncEnumerable<XLogData> xlogDataStream)
+            {
+                await foreach (var xLogData in xlogDataStream)
+                    yield return xLogData;
+            }
+        }
 
         #endregion Replication commands
     }

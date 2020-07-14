@@ -7,13 +7,13 @@ using JetBrains.Annotations;
 namespace Npgsql.Replication.Logical.TestDecoding
 {
     /// <summary>
-    /// Wraps a replication slot that uses the "test_decoding" plugin which can be used to perform streaming replication
-    /// using <see cref="NpgsqlTestDecodingData"/> messages.
+    /// Wraps a replication slot that uses the "test_decoding" logical decoding plugin which can be used to perform
+    /// streaming replication using <see cref="NpgsqlTestDecodingData"/> messages.
     /// </summary>
     [PublicAPI]
     public sealed class NpgsqlTestDecodingReplicationSlot : NpgsqlLogicalReplicationSlot<NpgsqlTestDecodingData>
     {
-        internal NpgsqlTestDecodingReplicationSlot(NpgsqlReplicationConnection connection, string slotName,
+        internal NpgsqlTestDecodingReplicationSlot(NpgsqlLogicalReplicationConnection connection, string slotName,
             LogSequenceNumber consistentPoint, string snapshotName) : base(connection, slotName,
             consistentPoint, snapshotName, "test_decoding")
         {

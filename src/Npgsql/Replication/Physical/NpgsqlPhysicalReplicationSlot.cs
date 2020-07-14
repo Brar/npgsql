@@ -9,9 +9,9 @@ namespace Npgsql.Replication.Physical
     /// Wraps a replication slot that uses physical replication.
     /// </summary>
     [PublicAPI]
-    public class NpgsqlPhysicalReplicationSlot : NpgsqlReplicationSlot<XLogData>
+    public class NpgsqlPhysicalReplicationSlot : NpgsqlReplicationSlot<NpgsqlPhysicalReplicationConnection, XLogData>
     {
-        internal NpgsqlPhysicalReplicationSlot(NpgsqlReplicationConnection connection, string slotName,
+        internal NpgsqlPhysicalReplicationSlot(NpgsqlPhysicalReplicationConnection connection, string slotName,
             LogSequenceNumber consistentPoint) : base(connection, slotName, consistentPoint)
         {
         }
@@ -32,7 +32,7 @@ namespace Npgsql.Replication.Physical
         /// <see cref="XLogData"/> values.</returns>
         [PublicAPI]
         public override Task<IAsyncEnumerable<XLogData>> StartReplication(LogSequenceNumber? walLocation = null)
-            => StartReplicationInternal(null, walLocation);
+            => Connection.StartReplicationInternal(walLocation ?? ConsistentPoint, SlotName, null);
 
         /// <summary>
         /// Instructs the server to start streaming WAL for logical replication, starting at WAL location
@@ -51,28 +51,6 @@ namespace Npgsql.Replication.Physical
         /// <see cref="XLogData"/> values.</returns>
         [PublicAPI]
         public Task<IAsyncEnumerable<XLogData>> StartReplication(string timeline, LogSequenceNumber? walLocation = null)
-            => StartReplicationInternal(timeline, walLocation);
-
-        // ToDo: Investigate if there's a better representation for timeline than string.
-        async Task<IAsyncEnumerable<XLogData>> StartReplicationInternal(string? timeline,
-            LogSequenceNumber? walLocation = null)
-        {
-            var sb = new StringBuilder("START_REPLICATION SLOT ")
-                .Append(SlotName)
-                .Append(" PHYSICAL ")
-                .Append(walLocation?.ToString() ?? ConsistentPoint.ToString());
-
-            if (timeline != null)
-                sb.Append(' ').Append(timeline);
-
-            var stream = await Connection.StartReplication(sb.ToString(), false);
-            return StartStreaming(stream);
-
-            async IAsyncEnumerable<XLogData> StartStreaming(IAsyncEnumerable<XLogData> xlogDataStream)
-            {
-                await foreach (var xLogData in xlogDataStream)
-                    yield return xLogData;
-            }
-        }
+            => Connection.StartReplicationInternal(walLocation ?? ConsistentPoint, SlotName, timeline);
     }
 }

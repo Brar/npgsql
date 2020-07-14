@@ -9,13 +9,13 @@ using Npgsql.TypeHandlers.DateTimeHandlers;
 namespace Npgsql.Replication.Logical.Protocol
 {
     /// <summary>
-    /// Wraps a replication slot that uses the "pgoutput" plugin which can be used to perform streaming replication
-    /// using <see cref="LogicalReplicationProtocolMessage"/> instances.
+    /// Wraps a replication slot that uses the "pgoutput" logical decoding plugin which can be used to perform streaming
+    /// replication using <see cref="LogicalReplicationProtocolMessage"/> instances.
     /// </summary>
     [PublicAPI]
     public sealed class NpgsqlPgOutputReplicationSlot : NpgsqlLogicalReplicationSlot<LogicalReplicationProtocolMessage>
     {
-        internal NpgsqlPgOutputReplicationSlot(NpgsqlReplicationConnection connection, string slotName,
+        internal NpgsqlPgOutputReplicationSlot(NpgsqlLogicalReplicationConnection connection, string slotName,
             LogSequenceNumber consistentPoint, string snapshotName)
             : base(connection, slotName, consistentPoint, snapshotName, "pgoutput")
         {
