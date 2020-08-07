@@ -40,7 +40,7 @@ namespace Npgsql.Replication.Logical
         /// <see cref="NpgsqlReplicationConnection.ConnectionString">ConnectionString</see>.
         /// </summary>
         [PublicAPI]
-        public Task OpenAsync(CancellationToken cancellationToken = default)
+        public override Task OpenAsync(CancellationToken cancellationToken = default)
         {
             using (NoSynchronizationContextScope.Enter())
             {

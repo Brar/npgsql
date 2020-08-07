@@ -292,7 +292,7 @@ namespace Npgsql.Replication.Logical.Protocol
         /// one publication name.
         /// </remarks>
         public override Task<IAsyncEnumerable<LogicalReplicationProtocolMessage>> StartReplication(
-            LogSequenceNumber? walLocation = null)
+            LogSequenceNumber walLocation)
             => throw new NotSupportedException(
                 $"This overload is not supported by {nameof(NpgsqlPgOutputReplicationSlot)}. You have to specify at least one publication name.");
 

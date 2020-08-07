@@ -20,7 +20,7 @@ namespace Npgsql.Replication.Logical.Raw
             => StartReplicationStream(walLocation, options);
 
         /// <inheritdoc />
-        public override Task<IAsyncEnumerable<XLogData>> StartReplication(LogSequenceNumber? walLocation = null)
+        public override Task<IAsyncEnumerable<XLogData>> StartReplication(LogSequenceNumber walLocation)
             => StartReplicationStream(walLocation);
     }
 }

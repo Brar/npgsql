@@ -5,7 +5,7 @@ using JetBrains.Annotations;
 namespace Npgsql.Replication
 {
     /// <summary>
-    /// Wraps a PostgreSQL Write-Ahead Log Sequence Number (LSN) providing conversions
+    /// Wraps a PostgreSQL Write-Ahead Log Sequence Number (LSN, XLogRecPtr) providing conversions
     /// from/to <see cref="string"/> and <see cref="ulong"/> as well as some convenience methods and operators
     /// </summary>
     /// <remarks>
@@ -15,6 +15,11 @@ namespace Npgsql.Replication
     public readonly struct LogSequenceNumber
         : IEquatable<LogSequenceNumber>, IEquatable<ulong>, IComparable<LogSequenceNumber>, IComparable<ulong>
     {
+        /// <summary>
+        /// Zero is used indicate an invalid Log Sequence Number. No XLOG record can begin at zero.
+        /// </summary>
+        public static readonly LogSequenceNumber Invalid = new LogSequenceNumber(0ul);
+
         readonly ulong _value;
 
         /// <summary>

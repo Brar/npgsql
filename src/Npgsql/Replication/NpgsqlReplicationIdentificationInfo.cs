@@ -11,8 +11,8 @@ namespace Npgsql.Replication
         internal NpgsqlReplicationIdentificationInfo(
             string systemId,
             int timeline,
-            string xLogPos,
-            string dbName)
+            LogSequenceNumber xLogPos,
+            string? dbName)
         {
             SystemId = systemId;
             Timeline = timeline;
@@ -34,11 +34,11 @@ namespace Npgsql.Replication
         /// <summary>
         /// Current WAL flush location. Useful to get a known location in the write-ahead log where streaming can start.
         /// </summary>
-        public string XLogPos { get; }
+        public LogSequenceNumber XLogPos { get; }
 
         /// <summary>
         /// Database connected to or null.
         /// </summary>
-        public string DbName { get; }
+        public string? DbName { get; }
     }
 }

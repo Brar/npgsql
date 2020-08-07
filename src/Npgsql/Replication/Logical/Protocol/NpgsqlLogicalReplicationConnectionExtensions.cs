@@ -39,7 +39,7 @@ namespace Npgsql.Replication.Logical.Protocol
                 await connection.CreateReplicationSlotForPlugin(slotName, "pgoutput", temporary, slotSnapshotInitMode);
 
             return new NpgsqlPgOutputReplicationSlot(connection, slotInfo.SlotName, slotInfo.ConsistentPoint,
-                slotInfo.SnapshotName);
+                slotInfo.SnapshotName!);
         }
     }
 }

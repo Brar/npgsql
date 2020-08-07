@@ -24,12 +24,10 @@ namespace Npgsql.Replication
         /// </summary>
         /// <param name="connection">The replication connection to use to connect to this slot.</param>
         /// <param name="slotName">The name of the replication slot.</param>
-        /// <param name="consistentPoint">The WAL location at which the slot became consistent.</param>
-        private protected NpgsqlReplicationSlot(TConnection connection, string slotName, LogSequenceNumber consistentPoint)
+        private protected NpgsqlReplicationSlot(TConnection connection, string slotName)
         {
             Connection = connection;
             SlotName = slotName;
-            ConsistentPoint = consistentPoint;
         }
 
         private protected TConnection Connection { get; }
@@ -41,13 +39,6 @@ namespace Npgsql.Replication
         public string SlotName { get; }
 
         /// <summary>
-        /// The WAL location at which the slot became consistent.
-        /// This is the earliest location from which streaming can start on this replication slot.
-        /// </summary>
-        [PublicAPI]
-        public LogSequenceNumber ConsistentPoint { get; }
-
-        /// <summary>
         /// Instructs the server to start streaming WAL for replication, starting at WAL location
         /// <paramref name="walLocation"/>. The server can reply with an error, for example if the requested section of
         /// WAL has already been recycled. Some logical decoding plugins require additional options to be specified when
@@ -55,6 +46,6 @@ namespace Npgsql.Replication
         /// </summary>
         /// <param name="walLocation">The WAL location to begin streaming at.</param>
         /// <returns>An <see cref="IAsyncEnumerable{T}"/> streaming WAL entries.</returns>
-        public abstract Task<IAsyncEnumerable<TStream>> StartReplication(LogSequenceNumber? walLocation = null);
+        public abstract Task<IAsyncEnumerable<TStream>> StartReplication(LogSequenceNumber walLocation);
     }
 }

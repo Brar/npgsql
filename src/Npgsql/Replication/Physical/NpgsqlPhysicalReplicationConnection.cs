@@ -20,8 +20,16 @@ namespace Npgsql.Replication.Physical
         /// <see cref="NpgsqlReplicationConnection.ConnectionString">ConnectionString</see>.
         /// </summary>
         [PublicAPI]
-        public Task OpenAsync(CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
+        public override Task OpenAsync(CancellationToken cancellationToken = default)
+        {
+            using (NoSynchronizationContextScope.Enter())
+            {
+                return OpenAsync(new NpgsqlConnectionStringBuilder(ConnectionString)
+                {
+                    ReplicationMode = ReplicationMode.Physical
+                }, cancellationToken);
+            }
+        }
 
         #endregion Open
 
@@ -47,8 +55,8 @@ namespace Npgsql.Replication.Physical
         [PublicAPI]
         public async Task<NpgsqlPhysicalReplicationSlot> CreateReplicationSlot(
             string slotName,
-            bool temporary,
-            bool reserveWal)
+            bool temporary = false,
+            bool reserveWal = false)
         {
             var sb = new StringBuilder(" PHYSICAL");
 
@@ -71,13 +79,13 @@ namespace Npgsql.Replication.Physical
         /// If specified, streaming starts on that timeline; otherwise, the server's current timeline is selected.
         /// </param>
         [PublicAPI]
-        public Task<IAsyncEnumerable<XLogData>> StartReplication(LogSequenceNumber? walLocation = null,
+        public Task<IAsyncEnumerable<XLogData>> StartReplication(LogSequenceNumber walLocation,
             string? timeline = null)
-            => throw new NotImplementedException();
+            => StartReplicationInternal(walLocation);
 
         // ToDo: Investigate if there's a better representation for timeline than string.
         internal async Task<IAsyncEnumerable<XLogData>> StartReplicationInternal(LogSequenceNumber walLocation,
-            string? slotName, string? timeline)
+            string? slotName = null, string? timeline = null)
         {
             var sb = new StringBuilder("START_REPLICATION");
 

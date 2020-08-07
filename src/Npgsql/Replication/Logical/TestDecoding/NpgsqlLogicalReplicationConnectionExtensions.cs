@@ -42,7 +42,7 @@ namespace Npgsql.Replication.Logical.TestDecoding
                 await connection.CreateReplicationSlotForPlugin(slotName, "test_decoding", temporary, slotSnapshotInitMode);
 
             return new NpgsqlTestDecodingReplicationSlot(connection, slotInfo.SlotName, slotInfo.ConsistentPoint,
-                slotInfo.SnapshotName);
+                slotInfo.SnapshotName!);
         }
     }
 }

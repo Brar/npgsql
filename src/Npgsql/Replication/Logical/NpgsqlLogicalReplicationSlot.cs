@@ -24,12 +24,19 @@ namespace Npgsql.Replication.Logical
         /// <param name="outputPlugin">The name of the output plugin used by the replication slot.</param>
         [PublicAPI]
         protected NpgsqlLogicalReplicationSlot(NpgsqlLogicalReplicationConnection connection, string slotName,
-            LogSequenceNumber consistentPoint, string snapshotName, string outputPlugin) : base(connection, slotName,
-            consistentPoint)
+            LogSequenceNumber consistentPoint, string snapshotName, string outputPlugin) : base(connection, slotName)
         {
+            ConsistentPoint = consistentPoint;
             SnapshotName = snapshotName;
             OutputPlugin = outputPlugin;
         }
+
+        /// <summary>
+        /// The WAL location at which the slot became consistent.
+        /// This is the earliest location from which streaming can start on this replication slot.
+        /// </summary>
+        [PublicAPI]
+        public LogSequenceNumber ConsistentPoint { get; }
 
         /// <summary>
         /// The identifier of the snapshot exported by the command.

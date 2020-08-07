@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net.Security;
 using System.Text;
 using System.Threading;
@@ -82,6 +83,13 @@ namespace Npgsql.Replication
 
         #endregion Properties
 
+        /// <summary>
+        /// Opens a database replication connection with the property settings specified by the
+        /// <see cref="NpgsqlReplicationConnection.ConnectionString">ConnectionString</see>.
+        /// </summary>
+        [PublicAPI]
+        public abstract Task OpenAsync(CancellationToken cancellationToken = default);
+
         private protected async Task OpenAsync(NpgsqlConnectionStringBuilder settings, CancellationToken cancellationToken)
         {
             settings.Pooling = settings.Enlist = false;
@@ -101,7 +109,7 @@ namespace Npgsql.Replication
         /// </summary>
         /// <param name="lastFlushedLsn">The location of the last WAL byte + 1 flushed to disk in the standby.</param>
         /// <param name="lastAppliedLsn">The location of the last WAL byte + 1 applied in the standby.</param>
-        /// <param name="force">Force sending out the status update immediately. Otherwise this just updates the
+        /// <param name="forceSending">Force sending out the status update immediately. Otherwise this just updates the
         /// internal tracking of <paramref name="lastFlushedLsn"/> and <paramref name="lastAppliedLsn"/> and sends the
         /// status update on schedule at </param>
         /// <exception cref="InvalidOperationException"></exception>
@@ -111,19 +119,24 @@ namespace Npgsql.Replication
         /// </remarks>
         /// <returns>A Task representing the sending fo the status update (and not any PostgreSQL response.</returns>
         [PublicAPI]
-        public async Task SendStatusUpdate(ulong lastFlushedLsn = 0UL, ulong lastAppliedLsn = 0UL, bool force = false)
+        public async Task UpdateStatus(ulong lastFlushedLsn = 0UL, ulong lastAppliedLsn = 0UL, bool forceSending = true)
         {
-            if (force && State != ReplicationConnectionState.Streaming)
+            if (forceSending && State != ReplicationConnectionState.Streaming)
                 throw new InvalidOperationException("The connection must be streaming in order to send status updates");
 
+            Debug.WriteLineIf(!forceSending, $"In {nameof(UpdateStatus)}(), just updating LSN's for the next feedback because '{nameof(forceSending)}' wasn't set to true.");
             if (lastFlushedLsn > 0UL)
                 LastFlushedLsn = lastFlushedLsn;
 
             if (lastAppliedLsn > 0UL)
                 LastAppliedLsn = lastAppliedLsn;
 
-            if (force && await FeedbackSemaphore.WaitAsync(Timeout.Infinite))
+            Debug.WriteLineIf(forceSending, $"In {nameof(UpdateStatus)}(), waiting on {nameof(FeedbackSemaphore)} infinitely because we need to send the requested status update ASAP.");
+            if (forceSending && await FeedbackSemaphore.WaitAsync(Timeout.Infinite))
+            {
+                Debug.WriteLine($"In {nameof(UpdateStatus)}(), sending the requested status update.");
                 await SendFeedback();
+            }
         }
 
         /// <summary>
@@ -137,7 +150,7 @@ namespace Npgsql.Replication
             return new NpgsqlReplicationIdentificationInfo(
                 (string)results[0],
                 (int)results[1],
-                (string)results[2],
+                LogSequenceNumber.Parse((string)results[2]),
                 (string)results[3]);
         }
 
@@ -208,17 +221,18 @@ namespace Npgsql.Replication
                 throw connector.UnexpectedMessageReceived(msg.Code);
             }
 
-            return StartStreaming();
+            return StreamXLogData();
 
-            async IAsyncEnumerable<XLogData> StartStreaming()
+            async IAsyncEnumerable<XLogData> StreamXLogData()
             {
                 var buf = connector.ReadBuffer;
-                NpgsqlReadBuffer.ColumnStream columnStream = new NpgsqlReadBuffer.ColumnStream(buf);
+                var columnStream = new NpgsqlReadBuffer.ColumnStream(buf);
 
                 while (true)
                 {
                     try
                     {
+                        Debug.WriteLine($"In {nameof(StreamXLogData)}(), reading BackendMessage from the connector.");
                         msg = await connector.ReadMessage(true);
                     }
                     catch (PostgresException e) when (e.SqlState == PostgresErrorCodes.QueryCanceled)
@@ -231,12 +245,14 @@ namespace Npgsql.Replication
                         throw connector.UnexpectedMessageReceived(msg.Code);
 
                     var messageLength = ((CopyDataMessage)msg).Length;
+                    Debug.WriteLine($"In {nameof(StreamXLogData)}(), ensuring message byte is in the buffer.");
                     await buf.EnsureAsync(1);
                     var code = (char)buf.ReadByte();
                     switch (code)
                     {
                     case 'w': // XLogData
                     {
+                        Debug.WriteLine($"In {nameof(StreamXLogData)}(), reading XLogData, ensuring the 24 header bytes are in the buffer.");
                         await buf.EnsureAsync(24);
                         var startLsn = buf.ReadUInt64();
                         var endLsn = buf.ReadUInt64();
@@ -260,21 +276,29 @@ namespace Npgsql.Replication
                         // Our consumer may not have read the stream to the end, but it might as well have been us
                         // ourselves bypassing the stream and reading directly from the buffer in StartReplication()
                         else if (columnStream.Position < columnStream.Length && !bypassingStream)
+                        {
+                            Debug.WriteLine($"In {nameof(StreamXLogData)}(), after yielding XLogData, skipping unconsumed buffer bytes.");
                             await buf.Skip(columnStream.Length - columnStream.Position, true);
+                        }
 
                         continue;
                     }
 
                     case 'k': // Primary keepalive message
                     {
+                        Debug.WriteLine($"In {nameof(StreamXLogData)}(), reading keepalive message, ensuring the 17 bytes are in the buffer.");
                         await buf.EnsureAsync(17);
                         var endLsn = buf.ReadUInt64();
                         var timestamp = buf.ReadInt64();
                         var replyRequested = buf.ReadByte() == 1;
                         if (LastReceivedLsn < endLsn)
                             LastReceivedLsn = endLsn;
+                        Debug.WriteLineIf(replyRequested, $"In {nameof(StreamXLogData)}(), after reading keepalive message, waiting on {nameof(FeedbackSemaphore)} infinitely because we need to send the requested reply ASAP.");
                         if (replyRequested && await FeedbackSemaphore.WaitAsync(Timeout.Infinite))
+                        {
+                            Debug.WriteLine($"In {nameof(StreamXLogData)}(), after reading keepalive message, sending the requested feedback.");
                             await SendFeedback();
+                        }
 
                         continue;
                     }
@@ -405,8 +429,12 @@ namespace Npgsql.Replication
         {
             try
             {
+                Debug.WriteLine($"In {nameof(TimerSendFeedback)}(), challenging {nameof(FeedbackSemaphore)} if we can send the timer feedback.");
                 if (await FeedbackSemaphore.WaitAsync(TimeSpan.Zero))
+                {
+                    Debug.WriteLine($"In {nameof(TimerSendFeedback)}(), sending timer feedback.");
                     await SendFeedback();
+                }
             }
             // The timer thread might race against Dispose() which means that FeedbackTimer might already
             // be disposed. We ignore that since we're in tear down mode anyways and timer feedback isn't considered

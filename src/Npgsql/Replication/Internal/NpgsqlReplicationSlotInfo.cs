@@ -5,7 +5,7 @@
     /// </summary>
     public readonly struct NpgsqlReplicationSlotInfo
     {
-        internal NpgsqlReplicationSlotInfo(string slotName, string consistentPoint, string snapshotName, string outputPlugin)
+        internal NpgsqlReplicationSlotInfo(string slotName, string consistentPoint, string? snapshotName, string? outputPlugin)
         {
             SlotName = slotName;
             ConsistentPoint = LogSequenceNumber.Parse(consistentPoint);
@@ -28,11 +28,11 @@
         /// The identifier of the snapshot exported by the command.
         /// The snapshot is valid until a new command is executed on this connection or the replication connection is closed.
         /// </summary>
-        public string SnapshotName { get; }
+        public string? SnapshotName { get; }
 
         /// <summary>
         /// The name of the output plugin used by the newly-created replication slot.
         /// </summary>
-        public string OutputPlugin { get; }
+        public string? OutputPlugin { get; }
     }
 }

@@ -20,6 +20,16 @@ namespace Npgsql.Replication.Logical.TestDecoding
         }
 
         /// <summary>
+        /// Instructs the server to start streaming WAL for logical replication, starting at the first possible WAL location.
+        /// The server can reply with an error, for example if the requested section of WAL has already been recycled.
+        /// </summary>
+        /// <returns>An <see cref="IAsyncEnumerable{NpgsqlTestDecodingData}"/> streaming WAL entries in form of
+        /// <see cref="NpgsqlTestDecodingData"/> instances.</returns>
+        [PublicAPI]
+        public Task<IAsyncEnumerable<NpgsqlTestDecodingData>> StartReplication()
+            => StartReplication(LogSequenceNumber.Invalid);
+
+        /// <summary>
         /// Instructs the server to start streaming WAL for logical replication, starting at WAL location
         /// <paramref name="walLocation"/>. The server can reply with an error, for example if the requested section of
         /// WAL has already been recycled.
@@ -28,7 +38,7 @@ namespace Npgsql.Replication.Logical.TestDecoding
         /// <returns>An <see cref="IAsyncEnumerable{NpgsqlTestDecodingData}"/> streaming WAL entries in form of
         /// <see cref="NpgsqlTestDecodingData"/> instances.</returns>
         [PublicAPI]
-        public override async Task<IAsyncEnumerable<NpgsqlTestDecodingData>> StartReplication(LogSequenceNumber? walLocation = null)
+        public override async Task<IAsyncEnumerable<NpgsqlTestDecodingData>> StartReplication(LogSequenceNumber walLocation)
         {
             var stream = await StartReplicationStream(walLocation);
 

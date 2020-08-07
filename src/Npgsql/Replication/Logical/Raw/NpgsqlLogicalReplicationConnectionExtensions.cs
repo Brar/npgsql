@@ -44,7 +44,7 @@ namespace Npgsql.Replication.Logical.Raw
                 await connection.CreateReplicationSlotForPlugin(slotName, outputPlugin, temporary, slotSnapshotInitMode);
 
             return new NpgsqlRawLogicalReplicationSlot(connection, slotInfo.SlotName, slotInfo.ConsistentPoint,
-                slotInfo.SnapshotName, slotInfo.OutputPlugin);
+                slotInfo.SnapshotName!, slotInfo.OutputPlugin!);
         }
     }
 }
