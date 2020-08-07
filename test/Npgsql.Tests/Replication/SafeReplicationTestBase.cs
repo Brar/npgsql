@@ -23,11 +23,11 @@ namespace Npgsql.Tests.Replication
         [SetUp]
         public async Task Setup()
         {
-            await using var conn = OpenConnection();
-            var walLevel = (string)await conn.ExecuteScalarAsync("SHOW wal_level");
+            await using var conn = await OpenConnectionAsync();
+            var walLevel = (string)(await conn.ExecuteScalarAsync("SHOW wal_level"))!;
             if (walLevel != "logical")
                 TestUtil.IgnoreExceptOnBuildServer("wal_level needs to be set to 'logical' in the PostgreSQL conf");
-            _max_identifier_length = int.Parse((string)await conn.ExecuteScalarAsync("SHOW max_identifier_length"));
+            _max_identifier_length = int.Parse((string)(await conn.ExecuteScalarAsync("SHOW max_identifier_length"))!);
         }
 
         private protected async Task<TConnection> OpenReplicationConnectionAsync(NpgsqlConnectionStringBuilder? csb = null)
