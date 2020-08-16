@@ -25,6 +25,8 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
 #pragma warning disable 618
         typeof(NpgsqlDateTime),
 #pragma warning restore 618
+#else
+        typeof(Timestamp),
 #endif // LegacyProviderSpecificDateTimeTypes
         typeof(DateTime)
     }, DbType.DateTime)]
@@ -53,7 +55,7 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
         NpgsqlSimpleTypeHandlerWithPsv<DateTime, NpgsqlDateTime>
 #pragma warning restore 618
 #else
-        NpgsqlSimpleTypeHandler<DateTime>
+        NpgsqlSimpleTypeHandlerWithPsv<DateTime, Timestamp>
 #endif // LegacyProviderSpecificDateTimeTypes
     {
         /// <summary>
@@ -97,9 +99,9 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
             }
         }
 
+        /// <inheritdoc />
 #if LegacyProviderSpecificDateTimeTypes
 #pragma warning disable 618
-        /// <inheritdoc />
         protected override NpgsqlDateTime ReadPsv(NpgsqlReadBuffer buf, int len, FieldDescription? fieldDescription = null)
         {
             var value = buf.ReadInt64();
@@ -135,6 +137,9 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
             }
         }
 #pragma warning restore 618
+#else
+        protected override Timestamp ReadPsv(NpgsqlReadBuffer buf, int len, FieldDescription? fieldDescription = null)
+            => new Timestamp(buf.ReadInt64());
 #endif // LegacyProviderSpecificDateTimeTypes
 
         #endregion Read
@@ -144,9 +149,9 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
         /// <inheritdoc />
         public override int ValidateAndGetLength(DateTime value, NpgsqlParameter? parameter) => 8;
 
+        /// <inheritdoc />
 #if LegacyProviderSpecificDateTimeTypes
 #pragma warning disable 618
-        /// <inheritdoc />
         public override int ValidateAndGetLength(NpgsqlDateTime value, NpgsqlParameter? parameter) => 8;
 
         /// <inheritdoc />
@@ -178,6 +183,12 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
             }
         }
 #pragma warning restore 618
+#else
+        public override int ValidateAndGetLength(Timestamp value, NpgsqlParameter? parameter) => 8;
+
+        /// <inheritdoc />
+        public override void Write(Timestamp value, NpgsqlWriteBuffer buf, NpgsqlParameter? parameter)
+            => buf.WriteInt64(value.RawValue);
 #endif // LegacyProviderSpecificDateTimeTypes
 
         /// <inheritdoc />
@@ -207,12 +218,14 @@ namespace Npgsql.TypeHandlers.DateTimeHandlers
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static long ToPostgresTimestamp(DateTime value)
+            // The value argument is assumed to be in UTC already.
+            // We don't perform any checks here.
             // Rounding here would cause problems because we would round up DateTime.MaxValue
             // which would make it impossible to retrieve it back from the database, so we just drop the additional precision
             => (value.Ticks - PostgresTimestampOffsetTicks) / 10;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static DateTime FromPostgresTimestamp(long value)
-            => new DateTime(value * 10 + PostgresTimestampOffsetTicks);
+            => new DateTime(value * 10 + PostgresTimestampOffsetTicks, DateTimeKind.Utc);
     }
 }
