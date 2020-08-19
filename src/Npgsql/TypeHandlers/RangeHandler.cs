@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics.CodeAnalysis;
+using System.Threading;
 using System.Threading.Tasks;
 using Npgsql.BackendMessages;
 using Npgsql.PostgresTypes;
@@ -61,13 +62,13 @@ namespace Npgsql.TypeHandlers
 
         /// <inheritdoc />
         public override TAny Read<TAny>(NpgsqlReadBuffer buf, int len, FieldDescription? fieldDescription = null)
-            => Read<TAny>(buf, len, false, fieldDescription).Result;
+            => Read<TAny>(buf, len, false, default, fieldDescription).Result;
 
         /// <inheritdoc />
-        protected internal override ValueTask<TAny> Read<TAny>(NpgsqlReadBuffer buf, int len, bool async, FieldDescription? fieldDescription = null)
+        protected internal override ValueTask<TAny> Read<TAny>(NpgsqlReadBuffer buf, int len, bool async, CancellationToken cancellationToken, FieldDescription? fieldDescription = null)
         {
             if (this is INpgsqlTypeHandler<TAny> typedHandler)
-                return typedHandler.Read(buf, len, async, fieldDescription);
+                return typedHandler.Read(buf, len, async, cancellationToken, fieldDescription);
 
             throw new InvalidCastException(fieldDescription == null
                 ? $"Can't cast database type to {typeof(TAny).Name}"
@@ -75,16 +76,16 @@ namespace Npgsql.TypeHandlers
             );
         }
 
-        internal override async ValueTask<object> ReadAsObject(NpgsqlReadBuffer buf, int len, bool async, FieldDescription? fieldDescription = null)
-            => await Read(buf, len, async, fieldDescription);
+        internal override async ValueTask<object> ReadAsObject(NpgsqlReadBuffer buf, int len, bool async, CancellationToken cancellationToken, FieldDescription? fieldDescription = null)
+            => await Read(buf, len, async, cancellationToken, fieldDescription);
 
         internal override object ReadAsObject(NpgsqlReadBuffer buf, int len, FieldDescription? fieldDescription = null)
-            => Read(buf, len, false, fieldDescription).Result;
+            => Read(buf, len, false, default, fieldDescription).GetAwaiter().GetResult();
 
         /// <inheritdoc />
-        public async ValueTask<NpgsqlRange<TElement>> Read(NpgsqlReadBuffer buf, int len, bool async, FieldDescription? fieldDescription = null)
+        public async ValueTask<NpgsqlRange<TElement>> Read(NpgsqlReadBuffer buf, int len, bool async, CancellationToken cancellationToken, FieldDescription? fieldDescription = null)
         {
-            await buf.Ensure(1, async);
+            await buf.Ensure(1, async, cancellationToken);
 
             var flags = (RangeFlags)buf.ReadByte();
             if ((flags & RangeFlags.Empty) != 0)
@@ -92,11 +93,11 @@ namespace Npgsql.TypeHandlers
 
             var lowerBound = flags.HasFlag(RangeFlags.LowerBoundInfinite)
                 ? default
-                : await _elementHandler.ReadWithLength<TElement>(buf, async);
+                : await _elementHandler.ReadWithLength<TElement>(buf, async, cancellationToken);
 
             var upperBound = flags.HasFlag(RangeFlags.UpperBoundInfinite)
                 ? default
-                : await _elementHandler.ReadWithLength<TElement>(buf, async);
+                : await _elementHandler.ReadWithLength<TElement>(buf, async, cancellationToken);
 
             return new NpgsqlRange<TElement>(lowerBound, upperBound, flags);
         }

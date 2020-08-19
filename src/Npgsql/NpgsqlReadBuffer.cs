@@ -121,41 +121,59 @@ namespace Npgsql
         /// Ensures that <paramref name="count"/> bytes are available in the buffer, and if
         /// not, reads from the socket until enough is available.
         /// </summary>
-        public Task Ensure(int count, bool async) => Ensure(count, async, dontBreakOnTimeouts: false);
+        public Task Ensure(int count, bool async, CancellationToken cancellationToken)
+            => Ensure(count, async, false, cancellationToken);
 
         internal void Ensure(int count)
         {
             if (count <= ReadBytesLeft)
                 return;
-            Ensure(count, false).GetAwaiter().GetResult();
+            Ensure(count, false, default).GetAwaiter().GetResult();
         }
 
-        internal Task Ensure(int count, bool async, bool dontBreakOnTimeouts)
+        internal Task Ensure(int count, bool async, bool dontBreakOnTimeouts, CancellationToken cancellationToken)
         {
-            return count <= ReadBytesLeft ? Task.CompletedTask : EnsureLong();
+            if (count <= ReadBytesLeft)
+                return Task.CompletedTask;
 
-            async Task EnsureLong()
+            Debug.Assert(count <= Size);
+            Debug.Assert(count > ReadBytesLeft);
+            count -= ReadBytesLeft;
+
+            if (ReadPosition == FilledBytes)
             {
-                Debug.Assert(count <= Size);
-                Debug.Assert(count > ReadBytesLeft);
-                count -= ReadBytesLeft;
-                if (count <= 0) { return; }
+                Clear();
+            }
+            else if (count > Size - FilledBytes)
+            {
+                Array.Copy(Buffer, ReadPosition, Buffer, 0, ReadBytesLeft);
+                FilledBytes = ReadBytesLeft;
+                ReadPosition = 0;
+            }
 
-                if (ReadPosition == FilledBytes)
-                {
-                    Clear();
-                }
-                else if (count > Size - FilledBytes)
-                {
-                    Array.Copy(Buffer, ReadPosition, Buffer, 0, ReadBytesLeft);
-                    FilledBytes = ReadBytesLeft;
-                    ReadPosition = 0;
-                }
+            try
+            {
+                if (async)
+                    return ReadFromStreamAsync();
+
+                ReadFromStream();
+                return Task.CompletedTask;
+            }
+            // We don't want to catch the exceptions we just threw but all the rest that could potentially occur.
+            catch (Exception e) when (!(e is TimeoutException) &&
+                                      !(e is NpgsqlException ne && ne.InnerException is TimeoutException))
+            {
+                throw Connector.Break(new NpgsqlException("Exception while reading from stream", e));
+            }
+
+            async Task ReadFromStreamAsync()
+            {
+                CancellationTokenSource? linkedCts = null;
 
                 try
                 {
-                    var timeoutCt = CancellationToken.None;
-                    if (async && Timeout > TimeSpan.Zero)
+                    var finalToken = cancellationToken;
+                    if (Timeout > TimeSpan.Zero)
                     {
                         // We reuse the timeout's cancellation token source as long as it hasn't fired, but once it has
                         // there's no way to reset it (see https://github.com/dotnet/runtime/issues/4694)
@@ -165,16 +183,24 @@ namespace Npgsql
                             _timeoutCts.Dispose();
                             _timeoutCts = new CancellationTokenSource(Timeout);
                         }
-                        timeoutCt = _timeoutCts.Token;
+
+                        // If we have both, a timeout and a non-default cancellationToken we can't avoid allocating
+                        // a new linked token source
+                        if (cancellationToken.CanBeCanceled)
+                        {
+                            linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_timeoutCts.Token,
+                                cancellationToken);
+                            finalToken = linkedCts.Token;
+                        }
+                        else
+                            finalToken = _timeoutCts.Token;
                     }
 
                     var totalRead = 0;
                     while (count > 0)
                     {
                         var toRead = Size - FilledBytes;
-                        var read = async
-                            ? await Underlying.ReadAsync(Buffer, FilledBytes, toRead, timeoutCt)
-                            : Underlying.Read(Buffer, FilledBytes, toRead);
+                        var read = await Underlying.ReadAsync(Buffer, FilledBytes, toRead, finalToken);
 
                         if (read == 0)
                             throw new EndOfStreamException();
@@ -187,13 +213,11 @@ namespace Npgsql
                         // In this case, we consider it as timed out and fail with OperationCancelledException on next ReadAsync
                         // Or we consider it not timed out if we have already read everything (count == 0)
                         // In which case we reinitialize it on the next call to EnsureLong()
-                        if (async)
-                            _timeoutCts.CancelAfter(Timeout);
+                        _timeoutCts.CancelAfter(Timeout);
                     }
 
                     // Resetting cancellation token source, so we can use it again
-                    if (async)
-                        _timeoutCts.CancelAfter(-1);
+                    _timeoutCts.CancelAfter(-1);
 
                     NpgsqlEventSource.Log.BytesRead(totalRead);
                 }
@@ -207,6 +231,9 @@ namespace Npgsql
                     {
                     case OperationCanceledException _:
                         Debug.Assert(async);
+                        // We've got an async cancellation that does not come from our _timeoutCts
+                        if (!_timeoutCts.IsCancellationRequested)
+                            throw;
                         e = new TimeoutException("Timeout during reading attempt");
                         dontBreak = dontBreakOnTimeouts;
                         break;
@@ -222,12 +249,44 @@ namespace Npgsql
                     var exception = new NpgsqlException("Exception while reading from stream", e);
                     throw dontBreak ? exception : Connector.Break(exception);
                 }
+                finally
+                {
+                    linkedCts?.Dispose();
+                }
+            }
+
+            void ReadFromStream()
+            {
+                try
+                {
+                    var totalRead = 0;
+                    while (count > 0)
+                    {
+                        var toRead = Size - FilledBytes;
+                        var read = Underlying.Read(Buffer, FilledBytes, toRead);
+
+                        if (read == 0)
+                            throw new EndOfStreamException();
+                        count -= read;
+                        FilledBytes += read;
+                        totalRead += read;
+                    }
+
+                    NpgsqlEventSource.Log.BytesRead(totalRead);
+                }
+                catch (IOException e) when (
+                    dontBreakOnTimeouts && (e.InnerException as SocketException)?.SocketErrorCode ==
+                    (Type.GetType("Mono.Runtime") == null ? SocketError.TimedOut : SocketError.WouldBlock)
+                )
+                {
+                    throw new TimeoutException("Timeout while reading from stream");
+                }
             }
         }
 
-        internal void ReadMore() => ReadMore(false).GetAwaiter().GetResult();
+        internal void ReadMore() => ReadMore(false, default).GetAwaiter().GetResult();
 
-        internal Task ReadMore(bool async) => Ensure(ReadBytesLeft + 1, async);
+        internal Task ReadMore(bool async, CancellationToken cancellationToken) => Ensure(ReadBytesLeft + 1, async, cancellationToken);
 
         internal NpgsqlReadBuffer AllocateOversize(int count)
         {
@@ -253,7 +312,7 @@ namespace Npgsql
         /// <summary>
         /// Skip a given number of bytes.
         /// </summary>
-        public async Task Skip(long len, bool async)
+        public async Task Skip(long len, bool async, CancellationToken cancellationToken)
         {
             Debug.Assert(len >= 0);
 
@@ -263,11 +322,11 @@ namespace Npgsql
                 while (len > Size)
                 {
                     Clear();
-                    await Ensure(Size, async);
+                    await Ensure(Size, async, cancellationToken);
                     len -= Size;
                 }
                 Clear();
-                await Ensure((int)len, async);
+                await Ensure((int)len, async, cancellationToken);
             }
 
             ReadPosition += (int)len;
@@ -462,7 +521,7 @@ namespace Npgsql
             }
         }
 
-        public ValueTask<int> ReadAsync(Memory<byte> output)
+        public ValueTask<int> ReadAsync(Memory<byte> output, CancellationToken cancellationToken)
         {
             var readFromBuffer = Math.Min(ReadBytesLeft, output.Length);
             if (readFromBuffer > 0)
@@ -483,7 +542,7 @@ namespace Npgsql
                 Clear();
                 try
                 {
-                    var read = await Underlying.ReadAsync(output);
+                    var read = await Underlying.ReadAsync(output, cancellationToken);
                     if (read == 0)
                         throw new EndOfStreamException();
                     return read;

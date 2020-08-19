@@ -115,9 +115,9 @@ namespace Npgsql
         /// <summary>
         /// Commits the database transaction.
         /// </summary>
-        public override void Commit() => Commit(false).GetAwaiter().GetResult();
+        public override void Commit() => Commit(false, default).GetAwaiter().GetResult();
 
-        async Task Commit(bool async)
+        async Task Commit(bool async, CancellationToken cancellationToken)
         {
             CheckReady();
 
@@ -127,7 +127,7 @@ namespace Npgsql
             using (_connector.StartUserAction())
             {
                 Log.Debug("Committing transaction", _connector.Id);
-                await _connector.ExecuteInternalCommand(PregeneratedMessages.CommitTransaction, async);
+                await _connector.ExecuteInternalCommand(PregeneratedMessages.CommitTransaction, async, cancellationToken);
             }
         }
 
@@ -141,10 +141,8 @@ namespace Npgsql
         public Task CommitAsync(CancellationToken cancellationToken = default)
 #endif
         {
-            if (cancellationToken.IsCancellationRequested)
-                return Task.FromCanceled(cancellationToken);
             using (NoSynchronizationContextScope.Enter())
-                return Commit(true);
+                return Commit(true, cancellationToken);
         }
 
         #endregion
@@ -154,13 +152,13 @@ namespace Npgsql
         /// <summary>
         /// Rolls back a transaction from a pending state.
         /// </summary>
-        public override void Rollback() => Rollback(false).GetAwaiter().GetResult();
+        public override void Rollback() => Rollback(false, default).GetAwaiter().GetResult();
 
-        Task Rollback(bool async)
+        Task Rollback(bool async, CancellationToken cancellationToken)
         {
             CheckReady();
             return _connector.DatabaseInfo.SupportsTransactions
-                ? _connector.Rollback(async)
+                ? _connector.Rollback(async, cancellationToken)
                 : Task.CompletedTask;
         }
 
@@ -174,17 +172,15 @@ namespace Npgsql
         public Task RollbackAsync(CancellationToken cancellationToken = default)
 #endif
         {
-            if (cancellationToken.IsCancellationRequested)
-                return Task.FromCanceled(cancellationToken);
             using (NoSynchronizationContextScope.Enter())
-                return Rollback(true);
+                return Rollback(true, default);
         }
 
         #endregion
 
         #region Savepoints
 
-        async Task Save(string name, bool async)
+        async Task Save(string name, bool async, CancellationToken cancellationToken)
         {
             if (name == null)
                 throw new ArgumentNullException(nameof(name));
@@ -199,7 +195,7 @@ namespace Npgsql
             using (_connector.StartUserAction())
             {
                 Log.Debug($"Creating savepoint {name}", _connector.Id);
-                await _connector.ExecuteInternalCommand($"SAVEPOINT {name}", async);
+                await _connector.ExecuteInternalCommand($"SAVEPOINT {name}", async, cancellationToken);
             }
         }
 
@@ -208,10 +204,11 @@ namespace Npgsql
         /// </summary>
         /// <param name="name">The name of the savepoint.</param>
 #if NET461 || NETSTANDARD2_0 || NETSTANDARD2_1 || NETCOREAPP3_0
-        public void Save(string name) => Save(name, false).GetAwaiter().GetResult();
+        public void Save(string name)
 #else
-        public override void Save(string name) => Save(name, false).GetAwaiter().GetResult();
+        public override void Save(string name)
 #endif
+            => Save(name, false, default).GetAwaiter().GetResult();
 
         /// <summary>
         /// Creates a transaction save point.
@@ -224,13 +221,11 @@ namespace Npgsql
         public override Task SaveAsync(string name, CancellationToken cancellationToken = default)
 #endif
         {
-            if (cancellationToken.IsCancellationRequested)
-                return Task.FromCanceled(cancellationToken);
             using (NoSynchronizationContextScope.Enter())
-                return Save(name, true);
+                return Save(name, true, cancellationToken);
         }
 
-        async Task Rollback(string name, bool async)
+        async Task Rollback(string name, bool async, CancellationToken cancellationToken)
         {
             if (name == null)
                 throw new ArgumentNullException(nameof(name));
@@ -245,7 +240,7 @@ namespace Npgsql
             using (_connector.StartUserAction())
             {
                 Log.Debug($"Rolling back savepoint {name}", _connector.Id);
-                await _connector.ExecuteInternalCommand($"ROLLBACK TO SAVEPOINT {name}", async);
+                await _connector.ExecuteInternalCommand($"ROLLBACK TO SAVEPOINT {name}", async, cancellationToken);
             }
         }
 
@@ -258,7 +253,7 @@ namespace Npgsql
 #else
         public override void Rollback(string name)
 #endif
-            => Rollback(name, false).GetAwaiter().GetResult();
+            => Rollback(name, false, default).GetAwaiter().GetResult();
 
         /// <summary>
         /// Rolls back a transaction from a pending savepoint state.
@@ -271,13 +266,11 @@ namespace Npgsql
         public override Task RollbackAsync(string name, CancellationToken cancellationToken = default)
 #endif
         {
-            if (cancellationToken.IsCancellationRequested)
-                return Task.FromCanceled(cancellationToken);
             using (NoSynchronizationContextScope.Enter())
-                return Rollback(name, true);
+                return Rollback(name, true, cancellationToken);
         }
 
-        async Task Release(string name, bool async)
+        async Task Release(string name, bool async, CancellationToken cancellationToken)
         {
             if (name == null)
                 throw new ArgumentNullException(nameof(name));
@@ -292,7 +285,7 @@ namespace Npgsql
             using (_connector.StartUserAction())
             {
                 Log.Debug($"Releasing savepoint {name}", _connector.Id);
-                await _connector.ExecuteInternalCommand($"RELEASE SAVEPOINT {name}", async);
+                await _connector.ExecuteInternalCommand($"RELEASE SAVEPOINT {name}", async, cancellationToken);
             }
         }
 
@@ -301,10 +294,11 @@ namespace Npgsql
         /// </summary>
         /// <param name="name">The name of the savepoint.</param>
 #if NET461 || NETSTANDARD2_0 || NETSTANDARD2_1 || NETCOREAPP3_0
-        public void Release(string name) => Release(name, false).GetAwaiter().GetResult();
+        public void Release(string name)
 #else
-        public override void Release(string name) => Release(name, false).GetAwaiter().GetResult();
+        public override void Release(string name)
 #endif
+            => Release(name, false, default).GetAwaiter().GetResult();
 
         /// <summary>
         /// Releases a transaction from a pending savepoint state.
@@ -317,10 +311,8 @@ namespace Npgsql
         public override Task ReleaseAsync(string name, CancellationToken cancellationToken = default)
 #endif
         {
-            if (cancellationToken.IsCancellationRequested)
-                return Task.FromCanceled(cancellationToken);
             using (NoSynchronizationContextScope.Enter())
-                return Release(name, true);
+                return Release(name, true, cancellationToken);
         }
 
         #endregion
@@ -337,7 +329,7 @@ namespace Npgsql
 
             if (disposing && !IsCompleted)
             {
-                _connector.CloseOngoingOperations(async: false).GetAwaiter().GetResult();
+                _connector.CloseOngoingOperations(async: false, cancellationToken: default).GetAwaiter().GetResult();
                 Rollback();
             }
 
@@ -367,8 +359,8 @@ namespace Npgsql
 
             async ValueTask DisposeAsyncInternal()
             {
-                await _connector.CloseOngoingOperations(async: true);
-                await Rollback(async: true);
+                await _connector.CloseOngoingOperations(async: true, cancellationToken: default);
+                await Rollback(async: true, cancellationToken: default);
                 IsDisposed = true;
             }
         }
