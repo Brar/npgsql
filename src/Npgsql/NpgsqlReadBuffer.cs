@@ -474,6 +474,9 @@ namespace Npgsql
 
         public ValueTask<int> ReadAsync(Memory<byte> output, CancellationToken cancellationToken = default)
         {
+            if (output.Length == 0)
+                return new ValueTask<int>(0);
+
             var readFromBuffer = Math.Min(ReadBytesLeft, output.Length);
             if (readFromBuffer > 0)
             {
@@ -481,9 +484,6 @@ namespace Npgsql
                 ReadPosition += readFromBuffer;
                 return new ValueTask<int>(readFromBuffer);
             }
-
-            if (output.Length == 0)
-                return new ValueTask<int>(0);
 
             return ReadAsyncLong();
 

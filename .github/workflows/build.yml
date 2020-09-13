@@ -69,10 +69,12 @@ jobs:
           sudo sed -i 's/#ssl = off/ssl = on/' $PGDATA/postgresql.conf
           sudo sed -i 's/#max_prepared_transactions = 0/max_prepared_transactions = 10/' $PGDATA/postgresql.conf
           sudo sed -i 's/#password_encryption = md5/password_encryption = scram-sha-256/' $PGDATA/postgresql.conf
+          sudo sed -i 's/#wal_level = replica/wal_level = logical/' $PGDATA/postgresql.conf
           # Disable trust authentication, requiring MD5 passwords - some tests must fail if a password isn't provided.
           sudo sh -c "echo 'local all all trust' > $PGDATA/pg_hba.conf"
           sudo sh -c "echo 'host all npgsql_tests_scram all scram-sha-256' >> $PGDATA/pg_hba.conf"
           sudo sh -c "echo 'host all all all md5' >> $PGDATA/pg_hba.conf"
+          sudo sh -c "echo 'host replication all all md5' >> $PGDATA/pg_hba.conf"
           sudo pg_ctlcluster ${{ matrix.pg_major }} main restart
 
           # user 'npgsql_tests_scram' must be created with password encrypted as scram-sha-256 (which only applies after restart)
@@ -114,6 +116,7 @@ jobs:
           pgsql/bin/initdb -D pgsql/PGDATA -E UTF8 -U postgres
           SOCKET_DIR=$(echo "$LOCALAPPDATA\Temp" | sed 's|\\|/|g')
           sed -i "s|#unix_socket_directories = ''|unix_socket_directories = '$SOCKET_DIR'|" pgsql/PGDATA/postgresql.conf
+          sed -i "s|#wal_level = replica|wal_level = logical|" pgsql/PGDATA/postgresql.conf
           pgsql/bin/pg_ctl -D pgsql/PGDATA -l logfile -o '-c max_prepared_transactions=10 -c ssl=true -c ssl_cert_file=../server.crt -c ssl_key_file=../server.key' start
 
           # Configure test account
@@ -133,6 +136,7 @@ jobs:
           # Disable trust authentication, requiring MD5 passwords - some tests must fail if a password isn't provided.
           echo "host all npgsql_tests_scram all scram-sha-256" > pgsql/PGDATA/pg_hba.conf
           echo "host all all all md5" >> pgsql/PGDATA/pg_hba.conf
+          echo "host replication all all md5" >> pgsql/PGDATA/pg_hba.conf
 
       # TODO: Once test/Npgsql.Specification.Tests work, switch to just testing on the solution
       - name: Test
