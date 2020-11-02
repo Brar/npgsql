@@ -1,11 +1,11 @@
-﻿using Npgsql.Replication.Logical;
-using Npgsql.Replication.Logical.Protocol;
-using NUnit.Framework;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using NUnit.Framework;
+using Npgsql.Replication;
+using Npgsql.Replication.Messages;
 
 namespace Npgsql.Tests.Replication
 {
@@ -46,7 +46,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"INSERT INTO {tableName} (name) VALUES ('val1'), ('val2')");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new NpgsqlPgOutputPluginOptions(publicationName), streamingCts.Token)
+                    var messages = rc.StartReplication(slot, new NpgsqlLogicalReplicationOptions(publicationName), streamingCts.Token)
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -100,7 +100,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"UPDATE {tableName} SET name='val1' WHERE name='val'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new NpgsqlPgOutputPluginOptions(publicationName), streamingCts.Token)
+                    var messages = rc.StartReplication(slot, new NpgsqlLogicalReplicationOptions(publicationName), streamingCts.Token)
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -151,7 +151,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"UPDATE {tableName} SET name='val1' WHERE name='val'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new NpgsqlPgOutputPluginOptions(publicationName), streamingCts.Token)
+                    var messages = rc.StartReplication(slot, new NpgsqlLogicalReplicationOptions(publicationName), streamingCts.Token)
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -203,7 +203,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"UPDATE {tableName} SET name='val1' WHERE name='val'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new NpgsqlPgOutputPluginOptions(publicationName), streamingCts.Token)
+                    var messages = rc.StartReplication(slot, new NpgsqlLogicalReplicationOptions(publicationName), streamingCts.Token)
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -254,7 +254,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"DELETE FROM {tableName} WHERE name='val2'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new NpgsqlPgOutputPluginOptions(publicationName), streamingCts.Token)
+                    var messages = rc.StartReplication(slot, new NpgsqlLogicalReplicationOptions(publicationName), streamingCts.Token)
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -305,7 +305,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"DELETE FROM {tableName} WHERE name='val2'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new NpgsqlPgOutputPluginOptions(publicationName), streamingCts.Token)
+                    var messages = rc.StartReplication(slot, new NpgsqlLogicalReplicationOptions(publicationName), streamingCts.Token)
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -354,7 +354,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"DELETE FROM {tableName} WHERE name='val2'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new NpgsqlPgOutputPluginOptions(publicationName), streamingCts.Token)
+                    var messages = rc.StartReplication(slot, new NpgsqlLogicalReplicationOptions(publicationName), streamingCts.Token)
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -412,7 +412,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync(sb.ToString());
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new NpgsqlPgOutputPluginOptions(publicationName), streamingCts.Token)
+                    var messages = rc.StartReplication(slot, new NpgsqlLogicalReplicationOptions(publicationName), streamingCts.Token)
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
