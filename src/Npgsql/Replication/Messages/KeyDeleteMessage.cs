@@ -8,13 +8,20 @@ namespace Npgsql.Replication.Messages
     /// </summary>
     public sealed class KeyDeleteMessage : DeleteMessage
     {
-        internal KeyDeleteMessage(NpgsqlLogSequenceNumber walStart, NpgsqlLogSequenceNumber walEnd, DateTime serverClock,
-            uint relationId, ITupleData[] keyRow) : base(walStart, walEnd, serverClock, relationId)
-            => KeyRow = keyRow;
-
         /// <summary>
         /// Columns representing the primary key.
         /// </summary>
-        public ITupleData[] KeyRow { get; }
+        public ReadOnlyMemory<TupleData> KeyRow { get; private set; } = default!;
+
+        internal KeyDeleteMessage Populate(
+            NpgsqlLogSequenceNumber walStart, NpgsqlLogSequenceNumber walEnd, DateTime serverClock, uint relationId,
+            ReadOnlyMemory<TupleData> keyRow)
+        {
+            base.Populate(walStart, walEnd, serverClock, relationId);
+
+            KeyRow = keyRow;
+
+            return this;
+        }
     }
 }

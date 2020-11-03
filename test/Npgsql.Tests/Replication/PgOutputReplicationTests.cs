@@ -58,20 +58,20 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     Assert.That(relMsg.Namespace, Is.EqualTo("public"));
                     Assert.That(relMsg.RelationName, Is.EqualTo(tableName));
                     Assert.That(relMsg.Columns.Length, Is.EqualTo(2));
-                    Assert.That(relMsg.Columns[0].ColumnName, Is.EqualTo("id"));
-                    Assert.That(relMsg.Columns[1].ColumnName, Is.EqualTo("name"));
+                    Assert.That(relMsg.Columns.Span[0].ColumnName, Is.EqualTo("id"));
+                    Assert.That(relMsg.Columns.Span[1].ColumnName, Is.EqualTo("name"));
 
                     // Insert first value
                     var insertMsg = await NextMessage<InsertMessage>(messages);
                     Assert.That(insertMsg.NewRow.Length, Is.EqualTo(2));
-                    Assert.That(insertMsg.NewRow[0].Value, Is.EqualTo("1"));
-                    Assert.That(insertMsg.NewRow[1].Value, Is.EqualTo("val1"));
+                    Assert.That(insertMsg.NewRow.Span[0].Value, Is.EqualTo("1"));
+                    Assert.That(insertMsg.NewRow.Span[1].Value, Is.EqualTo("val1"));
 
                     // Insert second value
                     insertMsg = await NextMessage<InsertMessage>(messages);
                     Assert.That(insertMsg.NewRow.Length, Is.EqualTo(2));
-                    Assert.That(insertMsg.NewRow[0].Value, Is.EqualTo("2"));
-                    Assert.That(insertMsg.NewRow[1].Value, Is.EqualTo("val2"));
+                    Assert.That(insertMsg.NewRow.Span[0].Value, Is.EqualTo("2"));
+                    Assert.That(insertMsg.NewRow.Span[1].Value, Is.EqualTo("val2"));
 
                     // Commit Transaction
                     _ = await NextMessage<CommitMessage>(messages);
@@ -112,14 +112,14 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     Assert.That(relMsg.Namespace, Is.EqualTo("public"));
                     Assert.That(relMsg.RelationName, Is.EqualTo(tableName));
                     Assert.That(relMsg.Columns.Length, Is.EqualTo(2));
-                    Assert.That(relMsg.Columns[0].ColumnName, Is.EqualTo("id"));
-                    Assert.That(relMsg.Columns[1].ColumnName, Is.EqualTo("name"));
+                    Assert.That(relMsg.Columns.Span[0].ColumnName, Is.EqualTo("id"));
+                    Assert.That(relMsg.Columns.Span[1].ColumnName, Is.EqualTo("name"));
 
                     // Update
                     var updateMsg = await NextMessage<UpdateMessage>(messages);
                     Assert.That(updateMsg.NewRow.Length, Is.EqualTo(2));
-                    Assert.That(updateMsg.NewRow[0].Value, Is.EqualTo("1"));
-                    Assert.That(updateMsg.NewRow[1].Value, Is.EqualTo("val1"));
+                    Assert.That(updateMsg.NewRow.Span[0].Value, Is.EqualTo("1"));
+                    Assert.That(updateMsg.NewRow.Span[1].Value, Is.EqualTo("val1"));
 
                     // Commit Transaction
                     _ = await NextMessage<CommitMessage>(messages);
@@ -163,17 +163,17 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     Assert.That(relMsg.Namespace, Is.EqualTo("public"));
                     Assert.That(relMsg.RelationName, Is.EqualTo(tableName));
                     Assert.That(relMsg.Columns.Length, Is.EqualTo(2));
-                    Assert.That(relMsg.Columns[0].ColumnName, Is.EqualTo("id"));
-                    Assert.That(relMsg.Columns[1].ColumnName, Is.EqualTo("name"));
+                    Assert.That(relMsg.Columns.Span[0].ColumnName, Is.EqualTo("id"));
+                    Assert.That(relMsg.Columns.Span[1].ColumnName, Is.EqualTo("name"));
 
                     // Update
                     var updateMsg = await NextMessage<IndexUpdateMessage>(messages);
                     Assert.That(updateMsg.KeyRow!.Length, Is.EqualTo(2));
-                    Assert.That(updateMsg.KeyRow![0].Value, Is.Null);
-                    Assert.That(updateMsg.KeyRow![1].Value, Is.EqualTo("val"));
+                    Assert.That(updateMsg.KeyRow!.Span[0].Value, Is.Null);
+                    Assert.That(updateMsg.KeyRow!.Span[1].Value, Is.EqualTo("val"));
                     Assert.That(updateMsg.NewRow.Length, Is.EqualTo(2));
-                    Assert.That(updateMsg.NewRow[0].Value, Is.EqualTo("1"));
-                    Assert.That(updateMsg.NewRow[1].Value, Is.EqualTo("val1"));
+                    Assert.That(updateMsg.NewRow.Span[0].Value, Is.EqualTo("1"));
+                    Assert.That(updateMsg.NewRow.Span[1].Value, Is.EqualTo("val1"));
 
                     // Commit Transaction
                     _ = await NextMessage<CommitMessage>(messages);
@@ -215,17 +215,17 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     Assert.That(relMsg.Namespace, Is.EqualTo("public"));
                     Assert.That(relMsg.RelationName, Is.EqualTo(tableName));
                     Assert.That(relMsg.Columns.Length, Is.EqualTo(2));
-                    Assert.That(relMsg.Columns[0].ColumnName, Is.EqualTo("id"));
-                    Assert.That(relMsg.Columns[1].ColumnName, Is.EqualTo("name"));
+                    Assert.That(relMsg.Columns.Span[0].ColumnName, Is.EqualTo("id"));
+                    Assert.That(relMsg.Columns.Span[1].ColumnName, Is.EqualTo("name"));
 
                     // Update
                     var updateMsg = await NextMessage<FullUpdateMessage>(messages);
                     Assert.That(updateMsg.OldRow!.Length, Is.EqualTo(2));
-                    Assert.That(updateMsg.OldRow![0].Value, Is.EqualTo("1"));
-                    Assert.That(updateMsg.OldRow![1].Value, Is.EqualTo("val"));
+                    Assert.That(updateMsg.OldRow!.Span[0].Value, Is.EqualTo("1"));
+                    Assert.That(updateMsg.OldRow!.Span[1].Value, Is.EqualTo("val"));
                     Assert.That(updateMsg.NewRow.Length, Is.EqualTo(2));
-                    Assert.That(updateMsg.NewRow[0].Value, Is.EqualTo("1"));
-                    Assert.That(updateMsg.NewRow[1].Value, Is.EqualTo("val1"));
+                    Assert.That(updateMsg.NewRow.Span[0].Value, Is.EqualTo("1"));
+                    Assert.That(updateMsg.NewRow.Span[1].Value, Is.EqualTo("val1"));
 
                     // Commit Transaction
                     _ = await NextMessage<CommitMessage>(messages);
@@ -266,14 +266,14 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     Assert.That(relMsg.Namespace, Is.EqualTo("public"));
                     Assert.That(relMsg.RelationName, Is.EqualTo(tableName));
                     Assert.That(relMsg.Columns.Length, Is.EqualTo(2));
-                    Assert.That(relMsg.Columns[0].ColumnName, Is.EqualTo("id"));
-                    Assert.That(relMsg.Columns[1].ColumnName, Is.EqualTo("name"));
+                    Assert.That(relMsg.Columns.Span[0].ColumnName, Is.EqualTo("id"));
+                    Assert.That(relMsg.Columns.Span[1].ColumnName, Is.EqualTo("name"));
 
                     // Delete
                     var deleteMsg = await NextMessage<KeyDeleteMessage>(messages);
                     Assert.That(deleteMsg.KeyRow!.Length, Is.EqualTo(2));
-                    Assert.That(deleteMsg.KeyRow[0].Value, Is.EqualTo("2"));
-                    Assert.That(deleteMsg.KeyRow[1].Value, Is.Null);
+                    Assert.That(deleteMsg.KeyRow.Span[0].Value, Is.EqualTo("2"));
+                    Assert.That(deleteMsg.KeyRow.Span[1].Value, Is.Null);
 
                     // Commit Transaction
                     _ = await NextMessage<CommitMessage>(messages);
@@ -317,14 +317,14 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     Assert.That(relMsg.Namespace, Is.EqualTo("public"));
                     Assert.That(relMsg.RelationName, Is.EqualTo(tableName));
                     Assert.That(relMsg.Columns.Length, Is.EqualTo(2));
-                    Assert.That(relMsg.Columns[0].ColumnName, Is.EqualTo("id"));
-                    Assert.That(relMsg.Columns[1].ColumnName, Is.EqualTo("name"));
+                    Assert.That(relMsg.Columns.Span[0].ColumnName, Is.EqualTo("id"));
+                    Assert.That(relMsg.Columns.Span[1].ColumnName, Is.EqualTo("name"));
 
                     // Delete
                     var deleteMsg = await NextMessage<KeyDeleteMessage>(messages);
                     Assert.That(deleteMsg.KeyRow!.Length, Is.EqualTo(2));
-                    Assert.That(deleteMsg.KeyRow[0].Value, Is.Null);
-                    Assert.That(deleteMsg.KeyRow[1].Value, Is.EqualTo("val2"));
+                    Assert.That(deleteMsg.KeyRow.Span[0].Value, Is.Null);
+                    Assert.That(deleteMsg.KeyRow.Span[1].Value, Is.EqualTo("val2"));
 
                     // Commit Transaction
                     _ = await NextMessage<CommitMessage>(messages);
@@ -366,14 +366,14 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     Assert.That(relMsg.Namespace, Is.EqualTo("public"));
                     Assert.That(relMsg.RelationName, Is.EqualTo(tableName));
                     Assert.That(relMsg.Columns.Length, Is.EqualTo(2));
-                    Assert.That(relMsg.Columns[0].ColumnName, Is.EqualTo("id"));
-                    Assert.That(relMsg.Columns[1].ColumnName, Is.EqualTo("name"));
+                    Assert.That(relMsg.Columns.Span[0].ColumnName, Is.EqualTo("id"));
+                    Assert.That(relMsg.Columns.Span[1].ColumnName, Is.EqualTo("name"));
 
                     // Delete
                     var deleteMsg = await NextMessage<FullDeleteMessage>(messages);
                     Assert.That(deleteMsg.OldRow!.Length, Is.EqualTo(2));
-                    Assert.That(deleteMsg.OldRow[0].Value, Is.EqualTo("2"));
-                    Assert.That(deleteMsg.OldRow[1].Value, Is.EqualTo("val2"));
+                    Assert.That(deleteMsg.OldRow.Span[0].Value, Is.EqualTo("2"));
+                    Assert.That(deleteMsg.OldRow.Span[1].Value, Is.EqualTo("val2"));
 
                     // Commit Transaction
                     _ = await NextMessage<CommitMessage>(messages);
@@ -424,8 +424,8 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     Assert.That(relMsg.Namespace, Is.EqualTo("public"));
                     Assert.That(relMsg.RelationName, Is.EqualTo(tableName));
                     Assert.That(relMsg.Columns.Length, Is.EqualTo(2));
-                    Assert.That(relMsg.Columns[0].ColumnName, Is.EqualTo("id"));
-                    Assert.That(relMsg.Columns[1].ColumnName, Is.EqualTo("name"));
+                    Assert.That(relMsg.Columns.Span[0].ColumnName, Is.EqualTo("id"));
+                    Assert.That(relMsg.Columns.Span[1].ColumnName, Is.EqualTo("name"));
 
                     // Truncate
                     var truncateMsg = await NextMessage<TruncateMessage>(messages);

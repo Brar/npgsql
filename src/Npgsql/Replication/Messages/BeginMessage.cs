@@ -1,5 +1,4 @@
-﻿using JetBrains.Annotations;
-using NpgsqlTypes;
+﻿using NpgsqlTypes;
 using System;
 
 namespace Npgsql.Replication.Messages
@@ -9,29 +8,32 @@ namespace Npgsql.Replication.Messages
     /// </summary>
     public sealed class BeginMessage : LogicalReplicationProtocolMessage
     {
-        internal BeginMessage(NpgsqlLogSequenceNumber walStart, NpgsqlLogSequenceNumber walEnd, DateTime serverClock,
-            NpgsqlLogSequenceNumber transactionFinalLsn, DateTime transactionCommitTimestamp, uint transactionXid)
-            : base(walStart, walEnd, serverClock)
-        {
-            TransactionFinalLsn = transactionFinalLsn;
-            TransactionCommitTimestamp = transactionCommitTimestamp;
-            TransactionXid = transactionXid;
-        }
-
         /// <summary>
         /// The final LSN of the transaction.
         /// </summary>
-        public NpgsqlLogSequenceNumber TransactionFinalLsn { get; }
+        public NpgsqlLogSequenceNumber TransactionFinalLsn { get; private set; }
 
         /// <summary>
         /// Commit timestamp of the transaction.
         /// The value is in number of microseconds since PostgreSQL epoch (2000-01-01).
         /// </summary>
-        public DateTime TransactionCommitTimestamp { get; }
+        public DateTime TransactionCommitTimestamp { get; private set; }
 
         /// <summary>
         /// Xid of the transaction.
         /// </summary>
-        public uint TransactionXid { get; }
+        public uint TransactionXid { get; private set; }
+
+        internal BeginMessage Populate(NpgsqlLogSequenceNumber walStart, NpgsqlLogSequenceNumber walEnd, DateTime serverClock,
+            NpgsqlLogSequenceNumber transactionFinalLsn, DateTime transactionCommitTimestamp, uint transactionXid)
+        {
+            base.Populate(walStart, walEnd, serverClock);
+
+            TransactionFinalLsn = transactionFinalLsn;
+            TransactionCommitTimestamp = transactionCommitTimestamp;
+            TransactionXid = transactionXid;
+
+            return this;
+        }
     }
 }

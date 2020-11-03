@@ -8,12 +8,19 @@ namespace Npgsql.Replication.Messages
     /// </summary>
     public abstract class DeleteMessage : LogicalReplicationProtocolMessage
     {
-        private protected DeleteMessage(NpgsqlLogSequenceNumber walStart, NpgsqlLogSequenceNumber walEnd, DateTime serverClock,
-            uint relationId) : base(walStart, walEnd, serverClock) => RelationId = relationId;
-
         /// <summary>
         /// ID of the relation corresponding to the ID in the relation message.
         /// </summary>
-        public uint RelationId { get; }
+        public uint RelationId { get; private set; }
+
+        private protected DeleteMessage Populate(
+            NpgsqlLogSequenceNumber walStart, NpgsqlLogSequenceNumber walEnd, DateTime serverClock, uint relationId)
+        {
+            base.Populate(walStart, walEnd, serverClock);
+
+            RelationId = relationId;
+
+            return this;
+        }
     }
 }

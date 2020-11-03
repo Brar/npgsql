@@ -19,6 +19,27 @@ namespace Npgsql.Replication
     {
         private protected override ReplicationMode ReplicationMode => ReplicationMode.Logical;
 
+        #region Cached messages
+
+        readonly BeginMessage _beginMessage = new BeginMessage();
+        readonly CommitMessage _commitMessage = new CommitMessage();
+        readonly FullDeleteMessage _fullDeleteMessage = new FullDeleteMessage();
+        readonly FullUpdateMessage _fullUpdateMessage = new FullUpdateMessage();
+        readonly IndexUpdateMessage _indexUpdateMessage = new IndexUpdateMessage();
+        readonly InsertMessage _insertMessage = new InsertMessage();
+        readonly KeyDeleteMessage _keyDeleteMessage = new KeyDeleteMessage();
+        readonly OriginMessage _originMessage = new OriginMessage();
+        readonly RelationMessage _relationMessage = new RelationMessage();
+        readonly TruncateMessage _truncateMessage = new TruncateMessage();
+        readonly TypeMessage _typeMessage = new TypeMessage();
+        readonly UpdateMessage _updateMessage = new UpdateMessage();
+
+        TupleData[] _tupleDataArray1 = Array.Empty<TupleData>();
+        TupleData[] _tupleDataArray2 = Array.Empty<TupleData>();
+        RelationMessage.Column[] _relationalMessageColumns = Array.Empty<RelationMessage.Column>();
+
+        #endregion
+
         /// <summary>
         /// Creates a <see cref="NpgsqlLogicalReplicationSlot"/> class that wraps a replication slot using the
         /// "pgoutput" logical decoding plugin and can be used to start streaming replication via the logical
@@ -110,7 +131,7 @@ namespace Npgsql.Replication
                 case BackendReplicationMessageCode.Begin:
                 {
                     await buf.EnsureAsync(20, cancellationToken);
-                    yield return new BeginMessage(
+                    yield return _beginMessage.Populate(
                         xLogData.WalStart,
                         xLogData.WalEnd,
                         xLogData.ServerClock,
@@ -123,7 +144,7 @@ namespace Npgsql.Replication
                 case BackendReplicationMessageCode.Commit:
                 {
                     await buf.EnsureAsync(25, cancellationToken);
-                    yield return new CommitMessage(
+                    yield return _commitMessage.Populate(
                         xLogData.WalStart,
                         xLogData.WalEnd,
                         xLogData.ServerClock,
@@ -137,7 +158,7 @@ namespace Npgsql.Replication
                 case BackendReplicationMessageCode.Origin:
                 {
                     await buf.EnsureAsync(9, cancellationToken);
-                    yield return new OriginMessage(
+                    yield return _originMessage.Populate(
                         xLogData.WalStart,
                         xLogData.WalEnd,
                         xLogData.ServerClock,
@@ -154,7 +175,8 @@ namespace Npgsql.Replication
                     await buf.EnsureAsync(3, cancellationToken);
                     var relationReplicaIdentitySetting = (char)buf.ReadByte();
                     var numColumns = buf.ReadUInt16();
-                    var columns = new RelationMessageColumn[numColumns];
+                    if (numColumns > _relationalMessageColumns.Length)
+                        _relationalMessageColumns = new RelationMessage.Column[numColumns];
                     for (var i = 0; i < numColumns; i++)
                     {
                         await buf.EnsureAsync(2, cancellationToken);
@@ -163,11 +185,10 @@ namespace Npgsql.Replication
                         await buf.EnsureAsync(8, cancellationToken);
                         var dateTypeId = buf.ReadUInt32();
                         var typeModifier = buf.ReadInt32();
-                        columns[i] = new RelationMessageColumn(flags, columnName, dateTypeId,
-                            typeModifier);
+                        _relationalMessageColumns[i] = new RelationMessage.Column(flags, columnName, dateTypeId, typeModifier);
                     }
 
-                    yield return new RelationMessage(
+                    yield return _relationMessage.Populate(
                         xLogData.WalStart,
                         xLogData.WalEnd,
                         xLogData.ServerClock,
@@ -175,7 +196,7 @@ namespace Npgsql.Replication
                         ns,
                         relationName,
                         relationReplicaIdentitySetting,
-                        columns
+                        new ReadOnlyMemory<RelationMessage.Column>(_relationalMessageColumns, 0, numColumns)
                     );
 
                     continue;
@@ -186,8 +207,7 @@ namespace Npgsql.Replication
                     var typeId = buf.ReadUInt32();
                     var ns = await buf.ReadNullTerminatedStringDefensive(NAMEDATALEN, cancellationToken);
                     var name = await buf.ReadNullTerminatedStringDefensive(NAMEDATALEN, cancellationToken);
-                    yield return new TypeMessage(xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock, typeId,
-                        ns, name);
+                    yield return _typeMessage.Populate(xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock, typeId, ns, name);
 
                     continue;
                 }
@@ -198,9 +218,8 @@ namespace Npgsql.Replication
                     var tupleDataType = (TupleType)buf.ReadByte();
                     Debug.Assert(tupleDataType == TupleType.NewTuple);
                     var numColumns = buf.ReadUInt16();
-                    var newRow = await ReadTupleDataAsync(numColumns);
-                    yield return new InsertMessage(xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock,
-                        relationId, newRow);
+                    var newRow = await ReadTupleDataAsync(ref _tupleDataArray1, numColumns);
+                    yield return _insertMessage.Populate(xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock, relationId, newRow);
 
                     continue;
                 }
@@ -213,29 +232,28 @@ namespace Npgsql.Replication
                     switch (tupleType)
                     {
                     case TupleType.Key:
-                        var keyRow = await ReadTupleDataAsync(numColumns);
+                        var keyRow = await ReadTupleDataAsync(ref _tupleDataArray1, numColumns);
                         await buf.EnsureAsync(3, cancellationToken);
                         tupleType = (TupleType)buf.ReadByte();
                         Debug.Assert(tupleType == TupleType.NewTuple);
                         numColumns = buf.ReadUInt16();
-                        var newRow = await ReadTupleDataAsync(numColumns);
-                        yield return new IndexUpdateMessage(xLogData.WalStart, xLogData.WalEnd,
-                            xLogData.ServerClock, relationId, newRow, keyRow);
+                        var newRow = await ReadTupleDataAsync(ref _tupleDataArray2, numColumns);
+                        yield return _indexUpdateMessage.Populate(
+                            xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock, relationId, newRow, keyRow);
                         continue;
                     case TupleType.OldTuple:
-                        var oldRow = await ReadTupleDataAsync(numColumns);
+                        var oldRow = await ReadTupleDataAsync(ref _tupleDataArray1, numColumns);
                         await buf.EnsureAsync(3, cancellationToken);
                         tupleType = (TupleType)buf.ReadByte();
                         Debug.Assert(tupleType == TupleType.NewTuple);
                         numColumns = buf.ReadUInt16();
-                        newRow = await ReadTupleDataAsync(numColumns);
-                        yield return new FullUpdateMessage(xLogData.WalStart, xLogData.WalEnd,
-                            xLogData.ServerClock, relationId, newRow, oldRow);
+                        newRow = await ReadTupleDataAsync(ref _tupleDataArray2, numColumns);
+                        yield return _fullUpdateMessage.Populate(
+                            xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock, relationId, newRow, oldRow);
                         continue;
                     case TupleType.NewTuple:
-                        newRow = await ReadTupleDataAsync(numColumns);
-                        yield return new UpdateMessage(xLogData.WalStart, xLogData.WalEnd,
-                            xLogData.ServerClock, relationId, newRow);
+                        newRow = await ReadTupleDataAsync(ref _tupleDataArray1, numColumns);
+                        yield return _updateMessage.Populate(xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock, relationId, newRow);
                         continue;
                     default:
                         throw new NotSupportedException($"The tuple type '{tupleType}' is not supported.");
@@ -250,12 +268,14 @@ namespace Npgsql.Replication
                     switch (tupleDataType)
                     {
                     case TupleType.Key:
-                        yield return new KeyDeleteMessage(xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock,
-                            relationId, await ReadTupleDataAsync(numColumns));
+                        yield return _keyDeleteMessage.Populate(
+                            xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock, relationId,
+                            await ReadTupleDataAsync(ref _tupleDataArray1, numColumns));
                         continue;
                     case TupleType.OldTuple:
-                        yield return new FullDeleteMessage(xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock,
-                            relationId, await ReadTupleDataAsync(numColumns));
+                        yield return _fullDeleteMessage.Populate(
+                            xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock, relationId,
+                            await ReadTupleDataAsync(ref _tupleDataArray1, numColumns));
                         continue;
                     default:
                         throw new NotSupportedException($"The tuple type '{tupleDataType}' is not supported.");
@@ -273,8 +293,8 @@ namespace Npgsql.Replication
                     for (var i = 0; i < numRels; i++)
                         relationIds[i] = buf.ReadUInt32();
 
-                    yield return new TruncateMessage(xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock,
-                        truncateOptions, relationIds);
+                    yield return _truncateMessage.Populate(
+                        xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock, truncateOptions, relationIds);
                     continue;
                 }
                 default:
@@ -282,32 +302,38 @@ namespace Npgsql.Replication
                         $"Invalid message code {messageCode} in Logical Replication Protocol.");
                 }
 
-                async Task<ITupleData[]> ReadTupleDataAsync(ushort numberOfColumns)
+                ValueTask<ReadOnlyMemory<TupleData>> ReadTupleDataAsync(ref TupleData[] array, ushort numberOfColumns)
                 {
-                    var ret = new ITupleData[numberOfColumns];
-                    for (var i = 0; i < numberOfColumns; i++)
-                    {
-                        await buf.EnsureAsync(1, cancellationToken);
-                        var subMessageKind = (TupleDataKind)buf.ReadByte();
-                        switch (subMessageKind)
-                        {
-                        case TupleDataKind.Null:
-                        case TupleDataKind.UnchangedToastedValue:
-                            ret[i] = new TupleData<string>(subMessageKind);
-                            break;
-                        case TupleDataKind.TextValue:
-                            await buf.EnsureAsync(4, cancellationToken);
-                            var len = buf.ReadInt32();
-                            await buf.EnsureAsync(len, cancellationToken);
-                            ret[i] = new TupleData<string>(TupleDataKind.TextValue, buf.ReadString(len));
-                            break;
-                        default:
-                            throw new NotSupportedException(
-                                $"The tuple data kind '{subMessageKind}' is not supported.");
-                        }
-                    }
+                    if (array.Length < numberOfColumns)
+                        array = new TupleData[numberOfColumns];
+                    var nonRefArray = array;
+                    return ReadTupleDataAsync2();
 
-                    return ret;
+                    async ValueTask<ReadOnlyMemory<TupleData>> ReadTupleDataAsync2()
+                    {
+                        for (var i = 0; i < numberOfColumns; i++)
+                        {
+                            await buf.EnsureAsync(1, cancellationToken);
+                            var subMessageKind = (TupleDataKind)buf.ReadByte();
+                            switch (subMessageKind)
+                            {
+                            case TupleDataKind.Null:
+                            case TupleDataKind.UnchangedToastedValue:
+                                nonRefArray[i] = new TupleData(subMessageKind);
+                                continue;
+                            case TupleDataKind.TextValue:
+                                await buf.EnsureAsync(4, cancellationToken);
+                                var len = buf.ReadInt32();
+                                await buf.EnsureAsync(len, cancellationToken);
+                                nonRefArray![i] = new TupleData(buf.ReadString(len));
+                                continue;
+                            default:
+                                throw new NotSupportedException($"The tuple data kind '{subMessageKind}' is not supported.");
+                            }
+                        }
+
+                        return new ReadOnlyMemory<TupleData>(nonRefArray, 0, numberOfColumns);
+                    }
                 }
             }
 
