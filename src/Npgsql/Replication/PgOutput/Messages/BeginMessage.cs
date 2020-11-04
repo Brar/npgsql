@@ -1,8 +1,7 @@
-﻿using JetBrains.Annotations;
+﻿using System;
 using NpgsqlTypes;
-using System;
 
-namespace Npgsql.Replication.Messages
+namespace Npgsql.Replication.PgOutput.Messages
 {
     /// <summary>
     /// Logical Replication Protocol begin message

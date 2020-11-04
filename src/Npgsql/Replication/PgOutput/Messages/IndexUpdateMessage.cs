@@ -1,8 +1,8 @@
-﻿using JetBrains.Annotations;
+﻿using System;
+using JetBrains.Annotations;
 using NpgsqlTypes;
-using System;
 
-namespace Npgsql.Replication.Messages
+namespace Npgsql.Replication.PgOutput.Messages
 {
     /// <summary>
     /// Logical Replication Protocol update message for tables with REPLICA IDENTITY set to USING INDEX.

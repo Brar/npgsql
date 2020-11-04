@@ -2,7 +2,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 
-namespace Npgsql.Replication.Messages
+namespace Npgsql.Replication.PgOutput.Messages
 {
     /// <summary>
     /// Represents the data transmitted for a tuple in a Logical Replication Protocol message

@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Npgsql.Replication.Messages
+namespace Npgsql.Replication.PgOutput.Messages
 {
     /// <summary>
     /// Enum representing the additional options for the TRUNCATE command as flags

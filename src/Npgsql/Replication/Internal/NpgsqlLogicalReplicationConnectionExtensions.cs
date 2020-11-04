@@ -122,7 +122,7 @@ namespace Npgsql.Replication.Internal
         /// <returns>A <see cref="Task{T}"/> representing an <see cref="IAsyncEnumerable{T}"/> that
         /// can be used to stream WAL entries in form of <see cref="NpgsqlXLogDataMessage"/> instances.</returns>
         public static IAsyncEnumerable<NpgsqlXLogDataMessage> StartReplicationForPlugin(
-            this NpgsqlLogicalReplicationConnection connection, NpgsqlLogicalReplicationSlotBase slot, CancellationToken cancellationToken,
+            this NpgsqlLogicalReplicationConnection connection, NpgsqlLogicalReplicationSlot slot, CancellationToken cancellationToken,
             NpgsqlLogSequenceNumber? walLocation = null, IEnumerable<KeyValuePair<string, string?>>? options = null)
         {
             using var _ = NoSynchronizationContextScope.Enter();

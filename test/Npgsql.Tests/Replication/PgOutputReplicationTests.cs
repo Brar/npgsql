@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Npgsql.Replication;
-using Npgsql.Replication.Messages;
+using Npgsql.Replication.PgOutput.Messages;
 
 namespace Npgsql.Tests.Replication
 {

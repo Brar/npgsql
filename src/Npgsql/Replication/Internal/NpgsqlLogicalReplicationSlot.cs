@@ -1,5 +1,4 @@
-﻿using JetBrains.Annotations;
-using NpgsqlTypes;
+﻿using NpgsqlTypes;
 using System;
 
 namespace Npgsql.Replication.Internal
@@ -7,14 +6,14 @@ namespace Npgsql.Replication.Internal
     /// <summary>
     /// Contains information about a newly-created logical replication slot.
     /// </summary>
-    public abstract class NpgsqlLogicalReplicationSlotBase : NpgsqlReplicationSlot
+    public abstract class NpgsqlLogicalReplicationSlot : NpgsqlReplicationSlot
     {
         /// <summary>
         /// Creates a new logical replication slot
         /// </summary>
         /// <param name="outputPlugin">The logical decoding output plugin to the corresponding replication slot was created for.</param>
         /// <param name="replicationSlotOptions">A <see cref="NpgsqlReplicationSlotOptions"/> struct with information to create the replication slot.</param>
-        protected NpgsqlLogicalReplicationSlotBase(string outputPlugin, NpgsqlReplicationSlotOptions replicationSlotOptions)
+        protected NpgsqlLogicalReplicationSlot(string outputPlugin, NpgsqlReplicationSlotOptions replicationSlotOptions)
             : base(replicationSlotOptions.SlotName)
         {
             OutputPlugin = outputPlugin ?? throw new ArgumentNullException(nameof(outputPlugin), $"The {nameof(outputPlugin)} argument can not be null.");

@@ -6,7 +6,7 @@ namespace Npgsql.Replication.TestDecoding
     /// Acts as a proxy for a logical replication slot
     /// initialized for for the test_decoding logical decoding plugin.
     /// </summary>
-    public class NpgsqlTestDecodingReplicationSlot : NpgsqlLogicalReplicationSlotBase
+    public class NpgsqlTestDecodingReplicationSlot : NpgsqlLogicalReplicationSlot
     {
         /// <summary>
         /// Creates a new <see cref="NpgsqlTestDecodingReplicationSlot"/> instance.

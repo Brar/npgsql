@@ -1,7 +1,7 @@
-﻿using NpgsqlTypes;
-using System;
+﻿using System;
+using NpgsqlTypes;
 
-namespace Npgsql.Replication.Messages
+namespace Npgsql.Replication.PgOutput.Messages
 {
     /// <summary>
     /// Logical Replication Protocol origin message
