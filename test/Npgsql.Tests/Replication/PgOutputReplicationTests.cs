@@ -18,7 +18,7 @@ namespace Npgsql.Tests.Replication
                 {
                     await using var c = await OpenConnectionAsync();
                     await using var rc = await OpenReplicationConnectionAsync();
-                    var options = await rc.CreateReplicationSlot(slotName);
+                    var options = await rc.CreatePgOutputReplicationSlot(slotName);
 
                     using var cmd =
                         new NpgsqlCommand($"SELECT * FROM pg_replication_slots WHERE slot_name = '{options.SlotName}'",
@@ -42,7 +42,7 @@ CREATE TABLE {tableName} (id INT PRIMARY KEY GENERATED ALWAYS AS IDENTITY, name 
 CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
 ");
                     var rc = await OpenReplicationConnectionAsync();
-                    var slot = await rc.CreateReplicationSlot(slotName);
+                    var slot = await rc.CreatePgOutputReplicationSlot(slotName);
                     await c.ExecuteNonQueryAsync($"INSERT INTO {tableName} (name) VALUES ('val1'), ('val2')");
 
                     using var streamingCts = new CancellationTokenSource();
@@ -96,7 +96,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
 CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
 ");
                     var rc = await OpenReplicationConnectionAsync();
-                    var slot = await rc.CreateReplicationSlot(slotName);
+                    var slot = await rc.CreatePgOutputReplicationSlot(slotName);
                     await c.ExecuteNonQueryAsync($"UPDATE {tableName} SET name='val1' WHERE name='val'");
 
                     using var streamingCts = new CancellationTokenSource();
@@ -147,7 +147,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
 CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
 ");
                     var rc = await OpenReplicationConnectionAsync();
-                    var slot = await rc.CreateReplicationSlot(slotName);
+                    var slot = await rc.CreatePgOutputReplicationSlot(slotName);
                     await c.ExecuteNonQueryAsync($"UPDATE {tableName} SET name='val1' WHERE name='val'");
 
                     using var streamingCts = new CancellationTokenSource();
@@ -199,7 +199,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
 CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
 ");
                     var rc = await OpenReplicationConnectionAsync();
-                    var slot = await rc.CreateReplicationSlot(slotName);
+                    var slot = await rc.CreatePgOutputReplicationSlot(slotName);
                     await c.ExecuteNonQueryAsync($"UPDATE {tableName} SET name='val1' WHERE name='val'");
 
                     using var streamingCts = new CancellationTokenSource();
@@ -250,7 +250,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
 CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
 ");
                     var rc = await OpenReplicationConnectionAsync();
-                    var slot = await rc.CreateReplicationSlot(slotName);
+                    var slot = await rc.CreatePgOutputReplicationSlot(slotName);
                     await c.ExecuteNonQueryAsync($"DELETE FROM {tableName} WHERE name='val2'");
 
                     using var streamingCts = new CancellationTokenSource();
@@ -301,7 +301,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
 CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
 ");
                     var rc = await OpenReplicationConnectionAsync();
-                    var slot = await rc.CreateReplicationSlot(slotName);
+                    var slot = await rc.CreatePgOutputReplicationSlot(slotName);
                     await c.ExecuteNonQueryAsync($"DELETE FROM {tableName} WHERE name='val2'");
 
                     using var streamingCts = new CancellationTokenSource();
@@ -350,7 +350,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
 CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
 ");
                     var rc = await OpenReplicationConnectionAsync();
-                    var slot = await rc.CreateReplicationSlot(slotName);
+                    var slot = await rc.CreatePgOutputReplicationSlot(slotName);
                     await c.ExecuteNonQueryAsync($"DELETE FROM {tableName} WHERE name='val2'");
 
                     using var streamingCts = new CancellationTokenSource();
@@ -403,7 +403,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
 CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
 ");
                     var rc = await OpenReplicationConnectionAsync();
-                    var slot = await rc.CreateReplicationSlot(slotName);
+                    var slot = await rc.CreatePgOutputReplicationSlot(slotName);
                     StringBuilder sb = new StringBuilder("TRUNCATE TABLE ").Append(tableName);
                     if (truncateOptionFlags.HasFlag(TruncateOptions.RestartIdentity))
                         sb.Append(" RESTART IDENTITY");

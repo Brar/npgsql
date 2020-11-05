@@ -53,7 +53,7 @@ namespace Npgsql.Replication
         /// <returns>
         /// A <see cref="NpgsqlLogicalReplicationSlot"/> that wraps the newly-created replication slot.
         /// </returns>
-        public static async Task<NpgsqlPgOutputReplicationSlot> CreateReplicationSlot(
+        public static async Task<NpgsqlPgOutputReplicationSlot> CreatePgOutputReplicationSlot(
             this NpgsqlLogicalReplicationConnection connection,
             string slotName,
             bool temporarySlot = false,
