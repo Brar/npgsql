@@ -19,6 +19,7 @@ namespace Npgsql.Util
 
         volatile CancellationTokenSource _cts = new CancellationTokenSource();
         CancellationTokenRegistration _registration;
+        bool _finalTimeoutSet;
 
         readonly object lockObject = new object();
 
@@ -42,17 +43,20 @@ namespace Npgsql.Util
 #if DEBUG
             Debug.Assert(!_isRunning);
 #endif
-            _cts.CancelAfter(Timeout);
-            if (_cts.IsCancellationRequested)
+            if (!_finalTimeoutSet)
             {
-                lock (lockObject)
+                _cts.CancelAfter(Timeout);
+                if (_cts.IsCancellationRequested)
                 {
-                    _cts.Dispose();
-                    _cts = new CancellationTokenSource(Timeout);
+                    lock (lockObject)
+                    {
+                        _cts.Dispose();
+                        _cts = new CancellationTokenSource(Timeout);
+                    }
                 }
+                if (cancellationToken.CanBeCanceled)
+                    _registration = cancellationToken.Register(cts => ((CancellationTokenSource)cts!).Cancel(), _cts);
             }
-            if (cancellationToken.CanBeCanceled)
-                _registration = cancellationToken.Register(cts => ((CancellationTokenSource)cts!).Cancel(), _cts);
 #if DEBUG
             _isRunning = true;
 #endif
@@ -63,7 +67,13 @@ namespace Npgsql.Util
         /// Restart the timeout on the wrapped <see cref="CancellationTokenSource"/> without reinitializing it,
         /// even if <see cref="IsCancellationRequested"/> is already set to <see langword="true"/>
         /// </summary>
-        public void RestartTimeoutWithoutReset() => _cts.CancelAfter(Timeout);
+        public void RestartTimeoutWithoutReset()
+        {
+            if (!_finalTimeoutSet)
+            {
+                _cts.CancelAfter(Timeout);
+            }
+        }
 
         /// <summary>
         /// Reset the wrapper to contain a unstarted and uncancelled <see cref="CancellationTokenSource"/>
@@ -75,18 +85,21 @@ namespace Npgsql.Util
         /// <returns>The <see cref="CancellationToken"/> from the wrapped <see cref="CancellationTokenSource"/></returns>
         public CancellationToken Reset(CancellationToken cancellationToken = default)
         {
-            _registration.Dispose();
-            _cts.CancelAfter(InfiniteTimeSpan);
-            if (_cts.IsCancellationRequested)
+            if (!_finalTimeoutSet)
             {
-                lock (lockObject)
+                _registration.Dispose();
+                _cts.CancelAfter(InfiniteTimeSpan);
+                if (_cts.IsCancellationRequested)
                 {
-                    _cts.Dispose();
-                    _cts = new CancellationTokenSource();
+                    lock (lockObject)
+                    {
+                        _cts.Dispose();
+                        _cts = new CancellationTokenSource();
+                    }
                 }
+                if (cancellationToken.CanBeCanceled)
+                    _registration = cancellationToken.Register(cts => ((CancellationTokenSource)cts!).Cancel(), _cts);
             }
-            if (cancellationToken.CanBeCanceled)
-                _registration = cancellationToken.Register(cts => ((CancellationTokenSource)cts!).Cancel(), _cts);
 #if DEBUG
             _isRunning = false;
 #endif
@@ -100,7 +113,7 @@ namespace Npgsql.Util
         /// </summary>
         public void ResetCts()
         {
-            if (_cts.IsCancellationRequested)
+            if (!_finalTimeoutSet && _cts.IsCancellationRequested)
             {
                 _cts.Dispose();
                 _cts = new CancellationTokenSource();
@@ -121,8 +134,11 @@ namespace Npgsql.Util
         /// </remarks>
         public void Stop()
         {
-            _cts.CancelAfter(InfiniteTimeSpan);
-            _registration.Dispose();
+            if (!_finalTimeoutSet)
+            {
+                _cts.CancelAfter(InfiniteTimeSpan);
+                _registration.Dispose();
+            }
 #if DEBUG
             _isRunning = false;
 #endif
@@ -146,6 +162,7 @@ namespace Npgsql.Util
         {
             lock (lockObject)
             {
+                _finalTimeoutSet = true;
                 _cts.CancelAfter(delay);
             }
         }
