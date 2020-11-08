@@ -47,7 +47,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"INSERT INTO {tableName} (name) VALUES ('val1'), ('val2')");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token)
+                    var messages = SkipEmptyTransactions(rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token))
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -98,7 +98,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"UPDATE {tableName} SET name='val1' WHERE name='val'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token)
+                    var messages = SkipEmptyTransactions(rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token))
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -146,7 +146,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"UPDATE {tableName} SET name='val1' WHERE name='val'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token)
+                    var messages = SkipEmptyTransactions(rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token))
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -195,7 +195,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"UPDATE {tableName} SET name='val1' WHERE name='val'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token)
+                    var messages = SkipEmptyTransactions(rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token))
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -246,7 +246,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"DELETE FROM {tableName} WHERE name='val2'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token)
+                    var messages = SkipEmptyTransactions(rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token))
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -294,7 +294,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"DELETE FROM {tableName} WHERE name='val2'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token)
+                    var messages = SkipEmptyTransactions(rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token))
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -340,7 +340,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync($"DELETE FROM {tableName} WHERE name='val2'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token)
+                    var messages = SkipEmptyTransactions(rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token))
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -395,7 +395,7 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await c.ExecuteNonQueryAsync(sb.ToString());
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token)
+                    var messages = SkipEmptyTransactions(rc.StartReplication(slot, new PgOutputReplicationOptions(publicationName), streamingCts.Token))
                         .GetAsyncEnumerator();
 
                     // Begin Transaction
@@ -423,75 +423,42 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await rc.DropReplicationSlot(slotName, cancellationToken: CancellationToken.None);
                 }, nameof(Truncate) + truncateOptionFlags.ToString("D"));
 
-        PgOutputReplicationMessage? _pendingMessage;
-
         async ValueTask<TExpected> NextMessage<TExpected>(IAsyncEnumerator<PgOutputReplicationMessage> enumerator)
             where TExpected : PgOutputReplicationMessage
         {
-            var current = await NextMessage(enumerator);
-            Assert.That(current, Is.TypeOf<TExpected>());
-            return (TExpected)current;
+            Assert.True(await enumerator.MoveNextAsync());
+            Assert.That(enumerator.Current, Is.TypeOf<TExpected>());
+            return (TExpected)enumerator.Current!;
         }
 
-        async ValueTask<PgOutputReplicationMessage> NextMessage(IAsyncEnumerator<PgOutputReplicationMessage> enumerator)
+        /// <summary>
+        /// Unfortunately, empty transactions may get randomly created by PG because of auto-vacuuming; these cause test failures as we
+        /// assert for specific expected message types. This filters them out.
+        /// </summary>
+        async IAsyncEnumerable<PgOutputReplicationMessage> SkipEmptyTransactions(IAsyncEnumerable<PgOutputReplicationMessage> messages)
         {
-            PgOutputReplicationMessage current;
-            if (_pendingMessage is null)
+            var enumerator = messages.GetAsyncEnumerator();
+            while (await enumerator.MoveNextAsync())
             {
-                Assert.True(await enumerator.MoveNextAsync());
-                while (true)
+                if (enumerator.Current is BeginMessage)
                 {
-                    current = enumerator.Current.Clone();
-                    if (current is BeginMessage)
+                    var current = enumerator.Current.Clone();
+                    if (!await enumerator.MoveNextAsync())
                     {
-                        Assert.True(await enumerator.MoveNextAsync());
-                        if (enumerator.Current is CommitMessage)
-                        {
-                            Assert.True(await enumerator.MoveNextAsync());
-                            continue;
-                        }
-
-                        _pendingMessage = enumerator.Current;
+                        yield return current;
+                        yield break;
                     }
 
-                    break;
-                }
-            }
-            else
-            {
-                current = _pendingMessage;
-                _pendingMessage = null;
-            }
+                    var next = enumerator.Current;
+                    if (next is CommitMessage)
+                        continue;
 
-            return current;
-        }
-
-        async Task AssertReplicationCancellation(IAsyncEnumerator<PgOutputReplicationMessage> enumerator)
-        {
-            try
-            {
-                await NextMessage(enumerator);
-                var builder = new StringBuilder($"[{enumerator.Current}]");
-
-                try
-                {
-                    while (true)
-                    {
-                        await NextMessage(enumerator);
-                        builder.Append($"[{enumerator.Current}]");
-                    }
+                    yield return current;
+                    yield return next;
+                    continue;
                 }
-                catch (Exception e)
-                {
-                    throw new Exception("Cancellation problem. Unexpected trailing messages: " + builder, e);
-                }
-            }
-            catch (Exception e)
-            {
-                Assert.That(e, Is.AssignableTo<OperationCanceledException>()
-                    .With.InnerException.InstanceOf<PostgresException>()
-                    .And.InnerException.Property(nameof(PostgresException.SqlState))
-                    .EqualTo(PostgresErrorCodes.QueryCanceled));
+
+                yield return enumerator.Current;
             }
         }
 
