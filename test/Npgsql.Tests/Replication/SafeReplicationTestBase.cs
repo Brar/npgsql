@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -56,32 +57,21 @@ namespace Npgsql.Tests.Replication
                     Assert.Fail("Expected replication cancellation but reached enumeration end instead");
                     return;
                 }
-                if (enumerator.Current is TestDecodingData testDecodingData)
+
+                var builder = new StringBuilder($"[{enumerator.Current}]");
+
+                try
                 {
-                    if (!testDecodingData.Data.StartsWith("COMMIT "))
+                    while (true)
                     {
-                        Assert.Fail("Expected replication cancellation but got: " + testDecodingData.Data);
-                        return;
+                        await enumerator.MoveNextAsync();
+                        builder.Append($"[{enumerator.Current}]");
                     }
-
-                    await enumerator.MoveNextAsync();
-                    Assert.Fail("Expected replication cancellation but got COMMIT followed by: " + testDecodingData.Data);
-                    return;
                 }
-                if (enumerator.Current is PgOutputReplicationMessage pgOutputReplicationMessage)
+                catch (Exception e)
                 {
-                    if (!(pgOutputReplicationMessage is CommitMessage))
-                    {
-                        Assert.Fail("Expected replication cancellation but got: " + pgOutputReplicationMessage.GetType().Name);
-                        return;
-                    }
-
-                    await enumerator.MoveNextAsync();
-                    Assert.Fail("Expected replication cancellation but got COMMIT followed by: " + pgOutputReplicationMessage.GetType().Name);
-                    return;
+                    throw new Exception("Cancellation problem. Unexpected trailing messages: " + builder, e);
                 }
-
-                Assert.Fail("WTF");
             }
             catch (Exception e)
             {
