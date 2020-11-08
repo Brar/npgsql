@@ -68,14 +68,17 @@ namespace Npgsql.Tests.Replication
         private protected Task SafeReplicationTest(Func<string, string, string, Task> testAction, [CallerMemberName] string memberName = "")
             => SafeReplicationTestCore(testAction, memberName);
 
+        int _testId;
+
         async Task SafeReplicationTestCore(Func<string, string, string, Task> testAction, string memberName)
         {
             // if the supplied name is too long we create on from a guid.
-            var baseName = $"{memberName}_{Postfix}";
-            var name = (baseName.Length > _maxIdentifierLength - 4 ? Guid.NewGuid().ToString("N") : baseName).ToLowerInvariant();
-            var slotName = $"s_{name}".ToLowerInvariant();
-            var tableName = $"t_{name}".ToLowerInvariant();
-            var publicationName = $"p_{name}".ToLowerInvariant();
+            // var baseName = $"{memberName}_{Postfix}";
+            // var name = (baseName.Length > _maxIdentifierLength - 4 ? Guid.NewGuid().ToString("N") : baseName).ToLowerInvariant();
+            var name = Interlocked.Increment(ref _testId);
+            var slotName = $"s_{name}";
+            var tableName = $"t_{name}";
+            var publicationName = $"p_{name}";
             try
             {
                 await testAction(slotName, tableName, publicationName);
