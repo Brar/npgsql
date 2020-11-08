@@ -423,14 +423,76 @@ CREATE PUBLICATION {publicationName} FOR TABLE {tableName};
                     await rc.DropReplicationSlot(slotName, cancellationToken: CancellationToken.None);
                 }, nameof(Truncate) + truncateOptionFlags.ToString("D"));
 
+        PgOutputReplicationMessage? _pendingMessage;
 
-        static async ValueTask<TExpected> NextMessage<TExpected>(
-            IAsyncEnumerator<PgOutputReplicationMessage> enumerator)
+        async ValueTask<TExpected> NextMessage<TExpected>(IAsyncEnumerator<PgOutputReplicationMessage> enumerator)
             where TExpected : PgOutputReplicationMessage
         {
-            Assert.True(await enumerator.MoveNextAsync());
-            Assert.That(enumerator.Current, Is.TypeOf<TExpected>());
-            return (TExpected)enumerator.Current!;
+            var current = await NextMessage(enumerator);
+            Assert.That(current, Is.TypeOf<TExpected>());
+            return (TExpected)current;
+        }
+
+        async ValueTask<PgOutputReplicationMessage> NextMessage(IAsyncEnumerator<PgOutputReplicationMessage> enumerator)
+        {
+            PgOutputReplicationMessage current;
+            if (_pendingMessage is null)
+            {
+                Assert.True(await enumerator.MoveNextAsync());
+                while (true)
+                {
+                    current = enumerator.Current.Clone();
+                    if (current is BeginMessage)
+                    {
+                        Assert.True(await enumerator.MoveNextAsync());
+                        if (enumerator.Current is CommitMessage)
+                        {
+                            Assert.True(await enumerator.MoveNextAsync());
+                            continue;
+                        }
+
+                        _pendingMessage = enumerator.Current;
+                    }
+
+                    break;
+                }
+            }
+            else
+            {
+                current = _pendingMessage;
+                _pendingMessage = null;
+            }
+
+            return current;
+        }
+
+        async Task AssertReplicationCancellation(IAsyncEnumerator<PgOutputReplicationMessage> enumerator)
+        {
+            try
+            {
+                await NextMessage(enumerator);
+                var builder = new StringBuilder($"[{enumerator.Current}]");
+
+                try
+                {
+                    while (true)
+                    {
+                        await NextMessage(enumerator);
+                        builder.Append($"[{enumerator.Current}]");
+                    }
+                }
+                catch (Exception e)
+                {
+                    throw new Exception("Cancellation problem. Unexpected trailing messages: " + builder, e);
+                }
+            }
+            catch (Exception e)
+            {
+                Assert.That(e, Is.AssignableTo<OperationCanceledException>()
+                    .With.InnerException.InstanceOf<PostgresException>()
+                    .And.InnerException.Property(nameof(PostgresException.SqlState))
+                    .EqualTo(PostgresErrorCodes.QueryCanceled));
+            }
         }
 
         protected override string Postfix => "pgoutput_l";

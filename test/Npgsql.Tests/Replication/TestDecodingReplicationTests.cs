@@ -353,10 +353,68 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
                     await rc.DropReplicationSlot(slotName, cancellationToken: CancellationToken.None);
                 });
 
-        static async ValueTask<TestDecodingData> NextMessage(IAsyncEnumerator<TestDecodingData> enumerator)
+        TestDecodingData? _pendingMessage;
+
+        async ValueTask<TestDecodingData> NextMessage(IAsyncEnumerator<TestDecodingData> enumerator)
         {
-            Assert.True(await enumerator.MoveNextAsync());
-            return enumerator.Current!;
+            TestDecodingData current;
+            if (_pendingMessage is null)
+            {
+                Assert.True(await enumerator.MoveNextAsync());
+                while (true)
+                {
+                    current = enumerator.Current.Clone();
+                    if (current.Data.StartsWith("BEGIN "))
+                    {
+                        Assert.True(await enumerator.MoveNextAsync());
+                        if (enumerator.Current.Data.StartsWith("COMMIT "))
+                        {
+                            Assert.True(await enumerator.MoveNextAsync());
+                            continue;
+                        }
+
+                        _pendingMessage = enumerator.Current;
+                    }
+
+                    break;
+                }
+            }
+            else
+            {
+                current = _pendingMessage;
+                _pendingMessage = null;
+            }
+
+            return current;
+        }
+
+        async Task AssertReplicationCancellation(IAsyncEnumerator<TestDecodingData> enumerator)
+        {
+            try
+            {
+                await NextMessage(enumerator);
+                var builder = new StringBuilder($"[{enumerator.Current}]");
+
+                try
+                {
+                    while (true)
+                    {
+                        await NextMessage(enumerator);
+                        builder.Append($"[{enumerator.Current}]");
+                    }
+                }
+                catch (Exception e)
+                {
+                    throw new Exception("Cancellation problem. Unexpected trailing messages: " + builder, e);
+                }
+            }
+            catch (Exception e)
+            {
+                Assert.That(e, Is.AssignableTo<OperationCanceledException>()
+                    .With.InnerException.InstanceOf<PostgresException>()
+                    .And.InnerException.Property(nameof(PostgresException.SqlState))
+                    .EqualTo(PostgresErrorCodes.QueryCanceled));
+            }
         }
 
         protected override string Postfix => "test_encoding_l";

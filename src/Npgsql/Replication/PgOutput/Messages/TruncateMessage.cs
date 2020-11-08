@@ -29,5 +29,13 @@ namespace Npgsql.Replication.PgOutput.Messages
 
             return this;
         }
+
+        /// <inheritdoc />
+        public override PgOutputReplicationMessage Clone()
+        {
+            var clone = new TruncateMessage();
+            clone.Populate(WalStart, WalEnd, ServerClock, Options, RelationIds); // TODO: RelationIds...
+            return clone;
+        }
     }
 }

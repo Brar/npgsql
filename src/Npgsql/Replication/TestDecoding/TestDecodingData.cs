@@ -26,5 +26,16 @@ namespace Npgsql.Replication.TestDecoding
 
         /// <inheritdoc />
         public override string ToString() => Data;
+
+        /// <summary>
+        ///
+        /// </summary>
+        /// <returns></returns>
+        public TestDecodingData Clone()
+        {
+            var clone = new TestDecodingData();
+            clone.Populate(WalStart, WalEnd, ServerClock, Data);
+            return clone;
+        }
     }
 }

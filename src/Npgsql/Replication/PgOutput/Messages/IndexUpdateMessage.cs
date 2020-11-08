@@ -23,5 +23,13 @@ namespace Npgsql.Replication.PgOutput.Messages
 
             return this;
         }
+
+        /// <inheritdoc />
+        public override PgOutputReplicationMessage Clone()
+        {
+            var clone = new IndexUpdateMessage();
+            clone.Populate(WalStart, WalEnd, ServerClock, RelationId, NewRow.ToArray(), KeyRow.ToArray());
+            return clone;
+        }
     }
 }

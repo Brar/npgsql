@@ -47,41 +47,6 @@ namespace Npgsql.Tests.Replication
             return c;
         }
 
-        private protected static async Task AssertReplicationCancellation<T>(IAsyncEnumerator<T> enumerator)
-        {
-            try
-            {
-                var succeeded = await enumerator.MoveNextAsync();
-                if (!succeeded)
-                {
-                    Assert.Fail("Expected replication cancellation but reached enumeration end instead");
-                    return;
-                }
-
-                var builder = new StringBuilder($"[{enumerator.Current}]");
-
-                try
-                {
-                    while (true)
-                    {
-                        await enumerator.MoveNextAsync();
-                        builder.Append($"[{enumerator.Current}]");
-                    }
-                }
-                catch (Exception e)
-                {
-                    throw new Exception("Cancellation problem. Unexpected trailing messages: " + builder, e);
-                }
-            }
-            catch (Exception e)
-            {
-                Assert.That(e, Is.AssignableTo<OperationCanceledException>()
-                    .With.InnerException.InstanceOf<PostgresException>()
-                    .And.InnerException.Property(nameof(PostgresException.SqlState))
-                    .EqualTo(PostgresErrorCodes.QueryCanceled));
-            }
-        }
-
         private protected Task SafeReplicationTest(Func<string, string, Task> testAction, [CallerMemberName] string memberName = "")
             => SafeReplicationTestCore((slotName, tableName, publicationName) => testAction(slotName, tableName), memberName);
 
