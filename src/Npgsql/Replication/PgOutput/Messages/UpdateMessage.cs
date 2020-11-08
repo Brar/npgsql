@@ -35,7 +35,11 @@ namespace Npgsql.Replication.PgOutput.Messages
         }
 
         /// <inheritdoc />
+#if NETSTANDARD2_0 || NETSTANDARD2_1 || NETCOREAPP3_1
         public override PgOutputReplicationMessage Clone()
+#else
+        public override UpdateMessage Clone()
+#endif
         {
             var clone = new UpdateMessage();
             clone.Populate(WalStart, WalEnd, ServerClock, RelationId, NewRow.ToArray());
