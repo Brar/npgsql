@@ -449,6 +449,8 @@ namespace Npgsql.Replication
                     var messageLength = ((CopyDataMessage)msg).Length;
                     await buf.Ensure(1, true, CancellationToken.None);
                     var code = (char)buf.ReadByte();
+
+                    Debug.WriteLine($"Received message code '{code}.");
                     switch (code)
                     {
                     case 'w': // XLogData

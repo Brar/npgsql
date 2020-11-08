@@ -1520,7 +1520,10 @@ namespace Npgsql
                         if (cancelImmediately || cancellationTimeout < 0)
                             ReadBuffer.Cts.Cancel();
                         else if (cancellationTimeout > 0)
+                        {
+                            Debug.WriteLine($"Set cancellation timeout to {Settings.CancellationTimeout}ms");
                             ReadBuffer.Cts.CancelAfter(Settings.CancellationTimeout);
+                        }
                     }
                 }
 

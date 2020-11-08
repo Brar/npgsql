@@ -163,9 +163,16 @@ namespace Npgsql
                 var finalCt = cancellationToken;
                 if (async)
                 {
-                    finalCt = Timeout > TimeSpan.Zero
-                        ? Cts.Start(cancellationToken)
-                        : Cts.Reset(cancellationToken);
+                    if (Timeout > TimeSpan.Zero)
+                    {
+                        finalCt = Cts.Start(cancellationToken);
+                        Debug.WriteLine("Started cancellationTokenSource");
+                    }
+                    else
+                    {
+                        finalCt = Cts.Reset(cancellationToken);
+                        Debug.WriteLine("Reset cancellationTokenSource");
+                    }
                 }
 
                 var totalRead = 0;
