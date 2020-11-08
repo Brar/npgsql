@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Npgsql.Replication;
+using Npgsql.Replication.PgOutput.Messages;
 using Npgsql.Replication.TestDecoding;
 
 namespace Npgsql.Tests.Replication
@@ -94,14 +95,23 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2')");
                     using var streamingCts = new CancellationTokenSource();
                     var messages = rc.StartReplication(slot, streamingCts.Token).GetAsyncEnumerator();
 
-                    // Begin Transaction
-                    var message = await NextMessage(messages);
-                    Assert.That(message.Data, Does.StartWith("BEGIN "));
+                    TestDecodingData message;
 
-                    // Update
-                    message = await NextMessage(messages);
-                    Assert.That(message.Data,
-                        Is.EqualTo($"table public.{tableName}: UPDATE: id[integer]:1 name[text]:'val1'"));
+                    // Begin Transaction
+                    while (true)
+                    {
+                        message = await NextMessage(messages);
+                        Assert.That(message.Data, Does.StartWith("BEGIN "));
+
+                        // Update
+                        message = await NextMessage(messages);
+                        if (message.Data.StartsWith("COMMIT "))
+                            continue;
+
+                        Assert.That(message.Data,
+                            Is.EqualTo($"table public.{tableName}: UPDATE: id[integer]:1 name[text]:'val1'"));
+                        break;
+                    }
 
                     // Commit Transaction
                     message = await NextMessage(messages);
