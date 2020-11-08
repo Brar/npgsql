@@ -50,7 +50,7 @@ namespace Npgsql.Tests.Replication
                     await c.ExecuteNonQueryAsync($"INSERT INTO {tableName} (name) VALUES ('val1'), ('val2')");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, streamingCts.Token).GetAsyncEnumerator();
+                    var messages = rc.StartReplication(slot, streamingCts.Token, new TestDecodingOptions(skipEmptyXacts: true)).GetAsyncEnumerator();
 
                     // Begin Transaction
                     var message = await NextMessage(messages);
@@ -94,7 +94,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2')");
                     await c.ExecuteNonQueryAsync($"UPDATE {tableName} SET name='val1' WHERE name='val'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, streamingCts.Token).GetAsyncEnumerator();
+                    var messages = rc.StartReplication(slot, streamingCts.Token, new TestDecodingOptions(skipEmptyXacts: true)).GetAsyncEnumerator();
 
                     TestDecodingData message;
 
@@ -147,7 +147,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
                     await c.ExecuteNonQueryAsync($"UPDATE {tableName} SET name='val1' WHERE name='val'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, streamingCts.Token).GetAsyncEnumerator();
+                    var messages = rc.StartReplication(slot, streamingCts.Token, new TestDecodingOptions(skipEmptyXacts: true)).GetAsyncEnumerator();
 
                     // Begin Transaction
                     var message = await NextMessage(messages);
@@ -184,7 +184,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
                     await c.ExecuteNonQueryAsync($"UPDATE {tableName} SET name='val1' WHERE name='val'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, streamingCts.Token).GetAsyncEnumerator();
+                    var messages = rc.StartReplication(slot, streamingCts.Token, new TestDecodingOptions(skipEmptyXacts: true)).GetAsyncEnumerator();
 
                     // Begin Transaction
                     var message = await NextMessage(messages);
@@ -220,7 +220,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
                     await c.ExecuteNonQueryAsync($"DELETE FROM {tableName} WHERE name='val2'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, streamingCts.Token).GetAsyncEnumerator();
+                    var messages = rc.StartReplication(slot, streamingCts.Token, new TestDecodingOptions(skipEmptyXacts: true)).GetAsyncEnumerator();
 
                     // Begin Transaction
                     var message = await NextMessage(messages);
@@ -259,7 +259,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
                     await c.ExecuteNonQueryAsync($"DELETE FROM {tableName} WHERE name='val2'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, streamingCts.Token).GetAsyncEnumerator();
+                    var messages = rc.StartReplication(slot, streamingCts.Token, new TestDecodingOptions(skipEmptyXacts: true)).GetAsyncEnumerator();
 
                     // Begin Transaction
                     var message = await NextMessage(messages);
@@ -296,7 +296,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
                     await c.ExecuteNonQueryAsync($"DELETE FROM {tableName} WHERE name='val2'");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, streamingCts.Token).GetAsyncEnumerator();
+                    var messages = rc.StartReplication(slot, streamingCts.Token, new TestDecodingOptions(skipEmptyXacts: true)).GetAsyncEnumerator();
 
                     // Begin Transaction
                     var message = await NextMessage(messages);
@@ -333,7 +333,7 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
                     await c.ExecuteNonQueryAsync($"TRUNCATE TABLE {tableName} RESTART IDENTITY CASCADE");
 
                     using var streamingCts = new CancellationTokenSource();
-                    var messages = rc.StartReplication(slot, streamingCts.Token).GetAsyncEnumerator();
+                    var messages = rc.StartReplication(slot, streamingCts.Token, new TestDecodingOptions(skipEmptyXacts: true)).GetAsyncEnumerator();
 
                     // Begin Transaction
                     var message = await NextMessage(messages);
@@ -353,39 +353,10 @@ INSERT INTO {tableName} (name) VALUES ('val'), ('val2');
                     await rc.DropReplicationSlot(slotName, cancellationToken: CancellationToken.None);
                 });
 
-        TestDecodingData? _pendingMessage;
-
-        async ValueTask<TestDecodingData> NextMessage(IAsyncEnumerator<TestDecodingData> enumerator)
+        static async ValueTask<TestDecodingData> NextMessage(IAsyncEnumerator<TestDecodingData> enumerator)
         {
-            TestDecodingData current;
-            if (_pendingMessage is null)
-            {
-                Assert.True(await enumerator.MoveNextAsync());
-                while (true)
-                {
-                    current = enumerator.Current.Clone();
-                    if (current.Data.StartsWith("BEGIN "))
-                    {
-                        Assert.True(await enumerator.MoveNextAsync());
-                        if (enumerator.Current.Data.StartsWith("COMMIT "))
-                        {
-                            Assert.True(await enumerator.MoveNextAsync());
-                            continue;
-                        }
-
-                        _pendingMessage = enumerator.Current;
-                    }
-
-                    break;
-                }
-            }
-            else
-            {
-                current = _pendingMessage;
-                _pendingMessage = null;
-            }
-
-            return current;
+            Assert.True(await enumerator.MoveNextAsync());
+            return enumerator.Current!;
         }
 
         async Task AssertReplicationCancellation(IAsyncEnumerator<TestDecodingData> enumerator)
