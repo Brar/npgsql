@@ -6,6 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Npgsql.Replication;
+using Npgsql.Replication.PgOutput.Messages;
+using Npgsql.Replication.TestDecoding;
 
 namespace Npgsql.Tests.Replication
 {
@@ -49,9 +51,37 @@ namespace Npgsql.Tests.Replication
             try
             {
                 var succeeded = await enumerator.MoveNextAsync();
-                Assert.Fail(succeeded
-                    ? $"Expected replication cancellation but got message: {enumerator.Current}"
-                    : "Expected replication cancellation but reached enumeration end instead");
+                if (!succeeded)
+                {
+                    Assert.Fail("Expected replication cancellation but reached enumeration end instead");
+                    return;
+                }
+                if (enumerator.Current is TestDecodingData testDecodingData)
+                {
+                    if (!testDecodingData.Data.StartsWith("COMMIT "))
+                    {
+                        Assert.Fail("Expected replication cancellation but got: " + testDecodingData.Data);
+                        return;
+                    }
+
+                    await enumerator.MoveNextAsync();
+                    Assert.Fail("Expected replication cancellation but got COMMIT followed by: " + testDecodingData.Data);
+                    return;
+                }
+                if (enumerator.Current is PgOutputReplicationMessage pgOutputReplicationMessage)
+                {
+                    if (!(pgOutputReplicationMessage is CommitMessage))
+                    {
+                        Assert.Fail("Expected replication cancellation but got: " + pgOutputReplicationMessage.GetType().Name);
+                        return;
+                    }
+
+                    await enumerator.MoveNextAsync();
+                    Assert.Fail("Expected replication cancellation but got COMMIT followed by: " + pgOutputReplicationMessage.GetType().Name);
+                    return;
+                }
+
+                Assert.Fail("WTF");
             }
             catch (Exception e)
             {
