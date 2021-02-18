@@ -82,3 +82,77 @@ override Npgsql.NpgsqlNestedDataReader.this[int ordinal].get -> object!
 override Npgsql.NpgsqlNestedDataReader.this[string! name].get -> object!
 Npgsql.NpgsqlNestedDataReader.GetData(int ordinal) -> Npgsql.NpgsqlNestedDataReader!
 Npgsql.NpgsqlDataReader.GetData(int ordinal) -> Npgsql.NpgsqlNestedDataReader!
+Npgsql.Replication.PgTarFileStream
+Npgsql.Replication.PgTarFileStream.ChkSum.get -> int
+Npgsql.Replication.PgTarFileStream.DevMajor.get -> int
+Npgsql.Replication.PgTarFileStream.DevMinor.get -> int
+Npgsql.Replication.PgTarFileStream.GId.get -> int
+Npgsql.Replication.PgTarFileStream.GName.get -> string!
+Npgsql.Replication.PgTarFileStream.LinkName.get -> string!
+Npgsql.Replication.PgTarFileStream.Mode.get -> int
+Npgsql.Replication.PgTarFileStream.MTime.get -> System.DateTime
+Npgsql.Replication.PgTarFileStream.Name.get -> string!
+Npgsql.Replication.PgTarFileStream.Size.get -> long
+Npgsql.Replication.PgTarFileStream.TypeFlag.get -> char
+Npgsql.Replication.PgTarFileStream.UId.get -> int
+Npgsql.Replication.PgTarFileStream.UName.get -> string!
+override Npgsql.Replication.PgTarFileStream.Read(byte[]! buffer, int offset, int count) -> int
+override Npgsql.Replication.PgTarFileStream.Read(System.Span<byte> span) -> int
+override Npgsql.Replication.PgTarFileStream.CanRead.get -> bool
+override Npgsql.Replication.PgTarFileStream.CanSeek.get -> bool
+override Npgsql.Replication.PgTarFileStream.CanWrite.get -> bool
+override Npgsql.Replication.PgTarFileStream.Flush() -> void
+override Npgsql.Replication.PgTarFileStream.Length.get -> long
+override Npgsql.Replication.PgTarFileStream.Position.get -> long
+override Npgsql.Replication.PgTarFileStream.Position.set -> void
+override Npgsql.Replication.PgTarFileStream.ReadAsync(byte[]! buffer, int offset, int count, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<int>!
+override Npgsql.Replication.PgTarFileStream.Seek(long offset, System.IO.SeekOrigin origin) -> long
+override Npgsql.Replication.PgTarFileStream.SetLength(long value) -> void
+override Npgsql.Replication.PgTarFileStream.Write(byte[]! buffer, int offset, int count) -> void
+override Npgsql.Replication.PgTarFileStream.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Npgsql.Replication.ChecksumAlgorithm
+Npgsql.Replication.ChecksumAlgorithm.None = 0 -> Npgsql.Replication.ChecksumAlgorithm
+Npgsql.Replication.ManifestOption
+Npgsql.Replication.ManifestOption.No = 0 -> Npgsql.Replication.ManifestOption
+Npgsql.Replication.ReplicationConnection.BaseBackup(string? label = null, bool progress = false, bool fast = false, bool wal = false, bool noWait = false, int? maxRate = null, bool tablespaceMap = false, bool noVerifyChecksums = false, Npgsql.Replication.ManifestOption? manifest = null, Npgsql.Replication.ChecksumAlgorithm? manifestChecksums = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Npgsql.Replication.IBackupResponse!>!
+Npgsql.Replication.ReplicationConnection.PostgreSqlVersion.get -> System.Version!
+Npgsql.Replication.ITableSpaceEnumerable
+Npgsql.Replication.ITableSpaceEnumerable.ApproximateSize.get -> ulong?
+Npgsql.Replication.ITableSpaceEnumerable.Oid.get -> uint?
+Npgsql.Replication.ITableSpaceEnumerable.Path.get -> string?
+Npgsql.Replication.ChecksumAlgorithm.Crc32C = 1 -> Npgsql.Replication.ChecksumAlgorithm
+Npgsql.Replication.ChecksumAlgorithm.Sha224 = 2 -> Npgsql.Replication.ChecksumAlgorithm
+Npgsql.Replication.ChecksumAlgorithm.Sha256 = 3 -> Npgsql.Replication.ChecksumAlgorithm
+Npgsql.Replication.ChecksumAlgorithm.Sha384 = 4 -> Npgsql.Replication.ChecksumAlgorithm
+Npgsql.Replication.ChecksumAlgorithm.Sha512 = 5 -> Npgsql.Replication.ChecksumAlgorithm
+Npgsql.Replication.ManifestOption.ForceEncode = 2 -> Npgsql.Replication.ManifestOption
+Npgsql.Replication.ManifestOption.Yes = 1 -> Npgsql.Replication.ManifestOption
+Npgsql.Replication.TableSpaceTarStream
+Npgsql.Replication.TableSpaceTarStream.ApproximateSize.get -> ulong?
+Npgsql.Replication.TableSpaceTarStream.Oid.get -> uint?
+Npgsql.Replication.TableSpaceTarStream.Path.get -> string?
+override Npgsql.Replication.TableSpaceTarStream.CanRead.get -> bool
+override Npgsql.Replication.TableSpaceTarStream.CanSeek.get -> bool
+override Npgsql.Replication.TableSpaceTarStream.CanWrite.get -> bool
+override Npgsql.Replication.TableSpaceTarStream.DisposeAsync() -> System.Threading.Tasks.ValueTask
+override Npgsql.Replication.TableSpaceTarStream.Flush() -> void
+override Npgsql.Replication.TableSpaceTarStream.Length.get -> long
+override Npgsql.Replication.TableSpaceTarStream.Position.get -> long
+override Npgsql.Replication.TableSpaceTarStream.Position.set -> void
+override Npgsql.Replication.TableSpaceTarStream.Read(byte[]! buffer, int offset, int count) -> int
+override Npgsql.Replication.TableSpaceTarStream.Read(System.Span<byte> span) -> int
+override Npgsql.Replication.TableSpaceTarStream.ReadAsync(byte[]! buffer, int offset, int count, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<int>!
+override Npgsql.Replication.TableSpaceTarStream.Seek(long offset, System.IO.SeekOrigin origin) -> long
+override Npgsql.Replication.TableSpaceTarStream.SetLength(long value) -> void
+override Npgsql.Replication.TableSpaceTarStream.Write(byte[]! buffer, int offset, int count) -> void
+Npgsql.Replication.BackupResponseKind
+Npgsql.Replication.BackupResponseKind.EndMessage = 3 -> Npgsql.Replication.BackupResponseKind
+Npgsql.Replication.BackupResponseKind.ManifestMessage = 2 -> Npgsql.Replication.BackupResponseKind
+Npgsql.Replication.BackupResponseKind.StartMessage = 0 -> Npgsql.Replication.BackupResponseKind
+Npgsql.Replication.BackupResponseKind.TablespaceMessage = 1 -> Npgsql.Replication.BackupResponseKind
+Npgsql.Replication.IBackupResponse
+Npgsql.Replication.IBackupResponse.Kind.get -> Npgsql.Replication.BackupResponseKind
+Npgsql.Replication.BackupPositionMessage
+Npgsql.Replication.BackupPositionMessage.Kind.get -> Npgsql.Replication.BackupResponseKind
+Npgsql.Replication.BackupPositionMessage.Position.get -> NpgsqlTypes.NpgsqlLogSequenceNumber
+Npgsql.Replication.BackupPositionMessage.TimelineId.get -> uint

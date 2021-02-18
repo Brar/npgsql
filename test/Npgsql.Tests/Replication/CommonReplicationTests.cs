@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -447,7 +448,27 @@ namespace Npgsql.Tests.Replication
 
         #region BaseBackup
 
-        // ToDo: Implement BaseBackup and create tests for it
+        //[Test]
+        //public async Task BaseBackup()
+        //{
+            //await using var rc = await OpenReplicationConnectionAsync();
+
+            //var baseBackup = rc.BaseBackup();
+            //await foreach (var tableSpaceInfo in baseBackup.TableSpaceInfos.ToArray())
+            //    Debug.WriteLine($"{tableSpaceInfo.Oid} -> {tableSpaceInfo.Path}");
+
+            //await foreach (var tableSpace in baseBackup)
+            //{
+            //    await foreach (var file in tableSpace)
+            //    {
+            //        Debug.Write($"{file.TypeFlag}: {file.Name}");
+            //        if (file.TypeFlag == '1' || file.TypeFlag == '2')
+            //            Debug.WriteLine($" -> {file.LinkName}");
+            //        else
+            //            Debug.WriteLine(string.Empty);
+            //    }
+            //}
+        //}
 
         #endregion
 

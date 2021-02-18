@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -26,6 +27,7 @@ namespace Npgsql.Replication
     {
         #region Fields
 
+        internal const int TarBlockSize = 512;
         static readonly Version FirstVersionWithoutDropSlotDoubleCommandCompleteMessage = new(13, 0);
         static readonly Version FirstVersionWithTemporarySlotsAndSlotSnapshotInitMode = new(10, 0);
         static readonly NpgsqlLogger Log = NpgsqlLogManager.CreateLogger(nameof(ReplicationConnection));
@@ -151,7 +153,11 @@ namespace Npgsql.Replication
 
         private protected abstract ReplicationMode ReplicationMode { get; }
 
-        internal Version PostgreSqlVersion => _npgsqlConnection.PostgreSqlVersion;
+        /// <summary>
+        /// Version of the PostgreSQL backend.
+        /// This can only be called when there is an active connection.
+        /// </summary>
+        public Version PostgreSqlVersion => _npgsqlConnection.PostgreSqlVersion;
 
         internal NpgsqlConnector Connector
             => _npgsqlConnection.Connector ??
@@ -534,6 +540,113 @@ namespace Npgsql.Replication
                 SetTimeouts(CommandTimeout, CommandTimeout);
 
                 completionSource.SetResult(0);
+            }
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="label"></param>
+        /// <param name="progress"></param>
+        /// <param name="fast"></param>
+        /// <param name="wal"></param>
+        /// <param name="noWait"></param>
+        /// <param name="maxRate"></param>
+        /// <param name="tablespaceMap"></param>
+        /// <param name="noVerifyChecksums"></param>
+        /// <param name="manifest"></param>
+        /// <param name="manifestChecksums"></param>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
+        public IAsyncEnumerable<IBackupResponse> BaseBackup(string? label = null,
+                                             bool progress = false,
+                                             bool fast = false,
+                                             bool wal = false,
+                                             bool noWait = false,
+                                             int? maxRate = null,
+                                             bool tablespaceMap = false,
+                                             bool noVerifyChecksums = false,
+                                             ManifestOption? manifest = null,
+                                             ChecksumAlgorithm? manifestChecksums = null,
+                                             CancellationToken cancellationToken = default)
+        {
+            using (NoSynchronizationContextScope.Enter())
+                return BaseBackupInternal();
+
+            async IAsyncEnumerable<IBackupResponse> BaseBackupInternal()
+            {
+                CheckDisposed();
+
+                using var _ = Connector.StartUserAction(cancellationToken, attemptPgCancellation: _pgCancellationSupported);
+
+                var command = new StringBuilder("BASE_BACKUP");
+                if (label != null)
+                    command.Append(" LABEL '").Append(label.Replace("'", "''")).Append('\'');
+                if (progress)
+                    command.Append(" PROGRESS");
+                if (fast)
+                    command.Append(" FAST");
+                if (wal)
+                    command.Append(" WAL");
+                if (noWait)
+                    command.Append(" NOWAIT");
+                if (maxRate.HasValue)
+                    command.Append(" MAX_RATE ").Append(maxRate);
+                if (tablespaceMap)
+                    command.Append(" TABLESPACE_MAP");
+                if (noVerifyChecksums)
+                    command.Append(" NOVERIFY_CHECKSUMS");
+                if (manifest.HasValue)
+                    command.Append(" MANIFEST '")
+                        .Append(manifest switch {
+                            ManifestOption.No => "no",
+                            ManifestOption.Yes => "yes",
+                            ManifestOption.ForceEncode => "force-encode",
+                            _ => throw new ArgumentOutOfRangeException(nameof(manifest), manifest, "Invalid manifest option")})
+                        .Append('\'');
+                if (manifestChecksums.HasValue)
+                    command.Append(" MANIFEST_CHECKSUMS '")
+                        .Append(manifestChecksums switch {
+                            ChecksumAlgorithm.None => "NONE",
+                            ChecksumAlgorithm.Crc32C => "CRC32C",
+                            ChecksumAlgorithm.Sha224 => "SHA224",
+                            ChecksumAlgorithm.Sha256 => "SHA256",
+                            ChecksumAlgorithm.Sha384 => "SHA384",
+                            ChecksumAlgorithm.Sha512 => "SHA512",
+                            _ => throw new ArgumentOutOfRangeException(nameof(manifestChecksums), manifestChecksums, "Invalid checksum algorithm")})
+                        .Append('\'');
+
+                await Connector.WriteQuery(command.ToString(), true, CancellationToken.None);
+                await Connector.Flush(true, CancellationToken.None);
+
+                // The first result set we get contains a single row with the start position and the the corresponding timeline id
+                var description =
+                    Expect<RowDescriptionMessage>(await Connector.ReadMessage(true), Connector);
+                Debug.Assert(description.Count == 2);
+                Debug.Assert(description[0].PostgresType.Name == "text");
+                Debug.Assert(description[1].PostgresType.Name == "bigint");
+                Expect<DataRowMessage>(await Connector.ReadMessage(true), Connector);
+                var buf = Connector.ReadBuffer;
+                await buf.EnsureAsync(2);
+                var cols = buf.ReadInt16();
+                Debug.Assert(cols == 2);
+
+                await buf.EnsureAsync(4);
+                var len = buf.ReadInt32();
+                Debug.Assert(len > 0);
+                await buf.EnsureAsync(len);
+                var startPosition = NpgsqlLogSequenceNumber.Parse(buf.ReadString(len));
+
+                await buf.EnsureAsync(4);
+                len = buf.ReadInt32();
+                Debug.Assert(len > 0);
+                await buf.EnsureAsync(len);
+                var timelineId = uint.Parse(buf.ReadString(len));
+                Expect<CommandCompleteMessage>(await Connector.ReadMessage(true), Connector);
+
+                yield return new BackupPositionMessage(BackupResponseKind.StartMessage, startPosition, timelineId);
+
+                //return await PgBaseBackup.CreateInstance(Connector, cancellationToken);
             }
         }
 
