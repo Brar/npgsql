@@ -1,79 +1,63 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Npgsql.BackendMessages;
 using Npgsql.Util;
+using static Npgsql.Util.Statics;
 
 namespace Npgsql.Replication
 {
     /// <summary>
     /// 
     /// </summary>
-    public sealed class TableSpaceTarStream : Stream, ITableSpaceEnumerable
+    public sealed class TablespaceBackupTarStream : Stream, IBackupResponse, IAsyncEnumerable<TarFileStream>, IDisposable, IAsyncDisposable
     {
-        readonly PgTableSpaceInfo _info;
-        readonly NpgsqlConnector _connector;
-        readonly CancellationToken _baseCancellationToken;
-        //bool _readingDone;
 
-        internal TableSpaceTarStream(PgTableSpaceInfo info, NpgsqlConnector connector, CancellationToken baseCancellationToken)
+        internal static TablespaceBackupTarStream Instance { get; } = new();
+
+        internal TablespaceBackupTarStream Load(NpgsqlConnector connector, CancellationToken baseCancellationToken)
         {
-            _info = info;
-            _connector = connector;
-            _baseCancellationToken = baseCancellationToken;
+            Instance._connector = connector;
+            Instance._baseCancellationToken = baseCancellationToken;
+            return Instance;
         }
 
-        #region ITableSpaceEnumerable
+        NpgsqlConnector _connector = default!;
+        CancellationToken _baseCancellationToken;
+        bool _readingDone;
 
-        /// <summary>
-        /// 
-        /// </summary>
-        public uint? Oid => _info.Oid;
+        BackupResponseKind IBackupResponse.Kind => BackupResponseKind.TablespaceDataMessage;
 
-        /// <summary>
-        /// 
-        /// </summary>
-        public string? Path => _info.Path;
-
-        /// <summary>
-        /// 
-        /// </summary>
-        public ulong? ApproximateSize => _info.Size;
-
-        BackupResponseKind IBackupResponse.Kind => BackupResponseKind.TablespaceMessage;
-
-        IAsyncEnumerator<PgTarFileStream> IAsyncEnumerable<PgTarFileStream>.GetAsyncEnumerator(CancellationToken cancellationToken)
+        IAsyncEnumerator<TarFileStream> IAsyncEnumerable<TarFileStream>.GetAsyncEnumerator(CancellationToken cancellationToken)
         {
             using (NoSynchronizationContextScope.Enter())
                 return GetAsyncEnumeratorInternal(
                     CancellationTokenSource.CreateLinkedTokenSource(_baseCancellationToken, cancellationToken).Token);
 
-            async IAsyncEnumerator<PgTarFileStream> GetAsyncEnumeratorInternal(CancellationToken innerCancellationToken)
+            async IAsyncEnumerator<TarFileStream> GetAsyncEnumeratorInternal(CancellationToken innerCancellationToken)
             {
                 while (true)
                 {
-                    var m = await _connector.ReadMessage(true);
-                    if (m is not CopyDataMessage cdm)
+                    var m = await _connector.ReadMessage(async: true);
+                    if (m.Code != BackendMessageCode.CopyData)
                     {
-                        Statics.Expect<CopyDoneMessage>(m, _connector);
-                        //_readingDone = true;
+                        Expect<CopyDoneMessage>(m, _connector);
+                        _readingDone = true;
                         yield break;
                     }
 
                     // We are at the beginning of a tar file, so this must be the header
-                    if (cdm.Length != ReplicationConnection.TarBlockSize)
-                        throw new NpgsqlException($"Invalid tar block header size: {cdm.Length}");
+                    Debug.Assert(((CopyDataMessage)m).Length == ReplicationConnection.TarBlockSize, $"Invalid tar block header size: {((CopyDataMessage)m).Length}");
 
-                    yield return await PgTarFileStream.Instance.Load(_connector, innerCancellationToken);
+                    yield return await TarFileStream.Instance.Load(_connector, innerCancellationToken);
                     // Make sure we skip unconsumed bytes
-                    await PgTarFileStream.Instance.DisposeAsync(true, true);
+                    await TarFileStream.Instance.DisposeAsync(true, true);
                 }
             }
         }
-
-        #endregion // ITableSpaceEnumerable
 
         #region Stream
 
@@ -123,13 +107,19 @@ namespace Npgsql.Replication
             base.Dispose(disposing);
         }
 
+#pragma warning disable CS1998 // Bei der asynchronen Methode fehlen "await"-Operatoren. Die Methode wird synchron ausgeführt.
         /// <inheritdoc />
-        public 
+        public async
 #if !NETSTANDARD2_0
             override
 #endif
         ValueTask DisposeAsync()
+#pragma warning restore CS1998 // Bei der asynchronen Methode fehlen "await"-Operatoren. Die Methode wird synchron ausgeführt.
         {
+            if (_readingDone)
+            {
+                return;
+            }
             throw new NotImplementedException();
         }
 

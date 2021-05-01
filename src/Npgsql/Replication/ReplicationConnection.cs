@@ -544,19 +544,37 @@ namespace Npgsql.Replication
         }
 
         /// <summary>
-        /// 
+        /// Instructs the server to start streaming a base backup.
+        /// The system will automatically be put in backup mode before the backup is started, and taken out of it when the backup is complete.
         /// </summary>
-        /// <param name="label"></param>
-        /// <param name="progress"></param>
-        /// <param name="fast"></param>
-        /// <param name="wal"></param>
-        /// <param name="noWait"></param>
-        /// <param name="maxRate"></param>
-        /// <param name="tablespaceMap"></param>
-        /// <param name="noVerifyChecksums"></param>
-        /// <param name="manifest"></param>
-        /// <param name="manifestChecksums"></param>
-        /// <param name="cancellationToken"></param>
+        /// <param name="label">Sets the label of the backup. If none is specified, a backup label of base backup will be used.
+        /// The quoting rules for the label are the same as a standard SQL string with standard_conforming_strings turned on.</param>
+        /// <param name="progress">Request information required to generate a progress report.
+        /// This will send back an approximate size in the header of each tablespace, which can be used to calculate how far along the stream is done.
+        /// This is calculated by enumerating all the file sizes once before the transfer is even started, and might as such have a negative impact on the performance.
+        /// In particular, it might take longer before the first data is streamed.
+        /// Since the database files can change during the backup, the size is only approximate and might both grow and shrink between the time of approximation and the sending of the actual files.</param>
+        /// <param name="fast">Request a fast checkpoint.</param>
+        /// <param name="wal">Include the necessary WAL segments in the backup. This will include all the files between start and stop backup in the pg_wal directory of the base directory tar file.</param>
+        /// <param name="noWait">By default, the backup will wait until the last required WAL segment has been archived, or emit a warning if log archiving is not enabled.
+        /// Setting this parameter to <see langword="true"/> disables both the waiting and the warning, leaving the client responsible for ensuring the required log is available.</param>
+        /// <param name="maxRate">Limit (throttle) the maximum amount of data transferred from server to client per unit of time.
+        /// The expected unit is kilobytes per second. If this option is specified, the value must either be equal to zero or it must fall within the range from 32 kB through 1 GB (inclusive).
+        /// If zero is passed or the option is not specified, no restriction is imposed on the transfer.</param>
+        /// <param name="tablespaceMap">Include information about symbolic links present in the directory pg_tblspc in a file named tablespace_map.
+        /// The tablespace map file includes each symbolic link name as it exists in the directory pg_tblspc/ and the full path of that symbolic link.</param>
+        /// <param name="noVerifyChecksums">By default, checksums are verified during a base backup if they are enabled.
+        /// Setting this parameter to <see langword="true"/> disables this verification.</param>
+        /// <param name="manifest">When this option is specified with a value of <see cref="ManifestOption.Yes"/> or <see cref="ManifestOption.ForceEncode"/>, a backup manifest is created and sent along with the backup.
+        /// The manifest is a list of every file present in the backup with the exception of any WAL files that may be included.
+        /// It also stores the size, last modification time, and optionally a checksum for each file.
+        /// A value of <see cref="ManifestOption.ForceEncode"/> forces all file names to be hex-encoded; otherwise, this type of encoding is performed only for files whose names are non-UTF8 octet sequences.
+        /// <see cref="ManifestOption.ForceEncode"/> is intended primarily for testing purposes, to be sure that clients which read the backup manifest can handle this case.
+        /// For compatibility with previous releases, if you do not set this parameter the default is <see cref="ManifestOption.No"/>.</param>
+        /// <param name="manifestChecksums">Specifies the checksum algorithm that should be applied to each file included in the backup manifest.
+        /// Currently, the available algorithms are <see cref="ChecksumAlgorithm.None"/>, <see cref="ChecksumAlgorithm.Crc32C"/>, <see cref="ChecksumAlgorithm.Sha224"/>, <see cref="ChecksumAlgorithm.Sha256"/>,
+        /// <see cref="ChecksumAlgorithm.Sha384"/>, and <see cref="ChecksumAlgorithm.Sha512"/>. If you do not set this parameter the default is <see cref="ChecksumAlgorithm.Crc32C"/>.</param>
+        /// <param name="cancellationToken">An optional token to cancel the asynchronous operation. The default value is <see cref="CancellationToken.None"/>.</param>
         /// <returns></returns>
         public IAsyncEnumerable<IBackupResponse> BaseBackup(string? label = null,
                                              bool progress = false,
@@ -571,14 +589,7 @@ namespace Npgsql.Replication
                                              CancellationToken cancellationToken = default)
         {
             using (NoSynchronizationContextScope.Enter())
-                return BaseBackupInternal();
-
-            async IAsyncEnumerable<IBackupResponse> BaseBackupInternal()
             {
-                CheckDisposed();
-
-                using var _ = Connector.StartUserAction(cancellationToken, attemptPgCancellation: _pgCancellationSupported);
-
                 var command = new StringBuilder("BASE_BACKUP");
                 if (label != null)
                     command.Append(" LABEL '").Append(label.Replace("'", "''")).Append('\'');
@@ -615,38 +626,146 @@ namespace Npgsql.Replication
                             ChecksumAlgorithm.Sha512 => "SHA512",
                             _ => throw new ArgumentOutOfRangeException(nameof(manifestChecksums), manifestChecksums, "Invalid checksum algorithm")})
                         .Append('\'');
+                return BaseBackupInternal(command.ToString());
+            }
 
-                await Connector.WriteQuery(command.ToString(), true, CancellationToken.None);
-                await Connector.Flush(true, CancellationToken.None);
+            async IAsyncEnumerable<IBackupResponse> BaseBackupInternal(string command)
+            {
+                CheckDisposed();
+
+                using var _ = Connector.StartUserAction(cancellationToken, attemptPgCancellation: _pgCancellationSupported);
+                await Connector.WriteQuery(command, async: true, CancellationToken.None);
+                await Connector.Flush(async: true, CancellationToken.None);
 
                 // The first result set we get contains a single row with the start position and the the corresponding timeline id
-                var description =
-                    Expect<RowDescriptionMessage>(await Connector.ReadMessage(true), Connector);
-                Debug.Assert(description.Count == 2);
-                Debug.Assert(description[0].PostgresType.Name == "text");
-                Debug.Assert(description[1].PostgresType.Name == "bigint");
-                Expect<DataRowMessage>(await Connector.ReadMessage(true), Connector);
+                IBackendMessage msg = Expect<RowDescriptionMessage>(await Connector.ReadMessage(async: true), Connector);
+                Debug.Assert(((RowDescriptionMessage)msg).Count == 2);
+                Debug.Assert(((RowDescriptionMessage)msg)[0].PostgresType.Name == "text");
+                Debug.Assert(((RowDescriptionMessage)msg)[1].PostgresType.Name == "bigint");
+                Expect<DataRowMessage>(await Connector.ReadMessage(async: true), Connector);
                 var buf = Connector.ReadBuffer;
+#if DEBUG
                 await buf.EnsureAsync(2);
                 var cols = buf.ReadInt16();
                 Debug.Assert(cols == 2);
+#else
+                await buf.Skip(2, async: true);
+#endif
 
                 await buf.EnsureAsync(4);
                 var len = buf.ReadInt32();
                 Debug.Assert(len > 0);
                 await buf.EnsureAsync(len);
-                var startPosition = NpgsqlLogSequenceNumber.Parse(buf.ReadString(len));
+                var position = NpgsqlLogSequenceNumber.Parse(buf.ReadString(len));
 
                 await buf.EnsureAsync(4);
                 len = buf.ReadInt32();
                 Debug.Assert(len > 0);
                 await buf.EnsureAsync(len);
                 var timelineId = uint.Parse(buf.ReadString(len));
-                Expect<CommandCompleteMessage>(await Connector.ReadMessage(true), Connector);
+                Expect<CommandCompleteMessage>(await Connector.ReadMessage(async: true), Connector);
 
-                yield return new BackupPositionMessage(BackupResponseKind.StartMessage, startPosition, timelineId);
+                yield return new BackupPositionMessage(BackupResponseKind.StartMessage, position, timelineId);
 
-                //return await PgBaseBackup.CreateInstance(Connector, cancellationToken);
+                // The second result set contains one row for each tablespace with the following fields:
+                // - The OID of the tablespace, or null if it's the base directory.
+                // - The full path of the tablespace directory, or null if it's the base directory.
+                // - The approximate size of the tablespace, in kilobytes (1024 bytes), if progress report has been requested; otherwise it's null.
+                msg = Expect<RowDescriptionMessage>(await Connector.ReadMessage(async: true), Connector);
+                Debug.Assert(((RowDescriptionMessage)msg).Count == 3);
+                Debug.Assert(((RowDescriptionMessage)msg)[0].PostgresType.Name == "oid");
+                Debug.Assert(((RowDescriptionMessage)msg)[1].PostgresType.Name == "text");
+                Debug.Assert(((RowDescriptionMessage)msg)[2].PostgresType.Name == "bigint");
+
+                var nTablespaces = 0;
+                msg = Expect<DataRowMessage>(await Connector.ReadMessage(async: true), Connector);
+                while (msg.Code == BackendMessageCode.DataRow)
+                {
+#if DEBUG
+                    await buf.EnsureAsync(2);
+                    cols = buf.ReadInt16();
+                    Debug.Assert(cols == 3);
+#else
+                await buf.Skip(2, async: true);
+#endif
+
+                    uint? oidspcoid = null;
+                    await buf.EnsureAsync(4);
+                    len = buf.ReadInt32();
+                    if (len > -1)
+                    {
+                        await buf.EnsureAsync(len);
+                        oidspcoid = uint.Parse(buf.ReadString(len));
+                    }
+
+                    string? spclocation = null;
+                    await buf.EnsureAsync(4);
+                    len = buf.ReadInt32();
+                    if (len > -1)
+                    {
+                        await buf.EnsureAsync(len);
+                        spclocation = buf.ReadString(len);
+                    }
+
+                    ulong? size = null;
+                    await buf.EnsureAsync(4);
+                    len = buf.ReadInt32();
+                    if (len > -1)
+                    {
+                        await buf.EnsureAsync(len);
+                        size = ulong.Parse(buf.ReadString(len));
+                    }
+
+                    nTablespaces++;
+                    yield return new TableSpaceInfoMessage(oidspcoid, spclocation, size);
+
+                    msg = await Connector.ReadMessage(true);
+                }
+                Expect<CommandCompleteMessage>(msg, Connector);
+
+                for (var i = 0; i < nTablespaces; i++)
+                {
+                    Expect<CopyOutResponseMessage>(await Connector.ReadMessage(async: true), Connector);
+                    yield return TablespaceBackupTarStream.Instance.Load(Connector, cancellationToken);
+                    await TablespaceBackupTarStream.Instance.DisposeAsync();
+                }
+
+                msg = await Connector.ReadMessage(true);
+
+                // If a backup manifest was requested we get another CopyOutResponse
+                if (msg.Code == BackendMessageCode.CopyOutResponse)
+                {
+                    throw new NotImplementedException();
+                }
+
+                // The last result set we get contains a single row with the end position and the the corresponding timeline id
+                Expect<RowDescriptionMessage>(msg, Connector);
+                Debug.Assert(((RowDescriptionMessage)msg).Count == 2);
+                Debug.Assert(((RowDescriptionMessage)msg)[0].PostgresType.Name == "text");
+                Debug.Assert(((RowDescriptionMessage)msg)[1].PostgresType.Name == "bigint");
+                Expect<DataRowMessage>(await Connector.ReadMessage(async: true), Connector);
+#if DEBUG
+                await buf.EnsureAsync(2);
+                cols = buf.ReadInt16();
+                Debug.Assert(cols == 2);
+#else
+                await buf.Skip(2, async: true);
+#endif
+
+                await buf.EnsureAsync(4);
+                len = buf.ReadInt32();
+                Debug.Assert(len > 0);
+                await buf.EnsureAsync(len);
+                position = NpgsqlLogSequenceNumber.Parse(buf.ReadString(len));
+
+                await buf.EnsureAsync(4);
+                len = buf.ReadInt32();
+                Debug.Assert(len > 0);
+                await buf.EnsureAsync(len);
+                timelineId = uint.Parse(buf.ReadString(len));
+                Expect<CommandCompleteMessage>(await Connector.ReadMessage(async: true), Connector);
+
+                yield return new BackupPositionMessage(BackupResponseKind.EndMessage, position, timelineId);
             }
         }
 

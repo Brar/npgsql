@@ -12,12 +12,12 @@ namespace Npgsql.Replication
     /// <summary>
     /// A read only <see cref="Stream"/> wrapping a PostgreSQl base backup file
     /// </summary>
-    public class PgTarFileStream : Stream
+    public class TarFileStream : Stream
     {
 #if NETSTANDARD2_0
         static readonly DateTime UnixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 #endif
-        internal static PgTarFileStream Instance = new();
+        internal static TarFileStream Instance = new();
 
         NpgsqlConnector _connector = default!;
         CancellationToken _baseCancellationToken = default!;
@@ -27,9 +27,9 @@ namespace Npgsql.Replication
         int _read; // The total number of bytes read
         int _currentMessageRead; // The number of bytes read from the current CopyDataMessage
 
-        PgTarFileStream() { }
+        TarFileStream() { }
 
-        internal async Task<PgTarFileStream> Load(NpgsqlConnector connector, CancellationToken baseCancellationToken)
+        internal async Task<TarFileStream> Load(NpgsqlConnector connector, CancellationToken baseCancellationToken)
         {
             _connector = connector;
             _baseCancellationToken = baseCancellationToken;
