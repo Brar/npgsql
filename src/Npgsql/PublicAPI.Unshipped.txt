@@ -128,7 +128,6 @@ Npgsql.Replication.TableSpaceInfoMessage.Oid.get -> uint?
 Npgsql.Replication.TableSpaceInfoMessage.Path.get -> string?
 Npgsql.Replication.TableSpaceInfoMessage.Size.get -> ulong?
 Npgsql.Replication.TablespaceBackupTarStream
-Npgsql.Replication.TablespaceBackupTarStream.TablespaceBackupTarStream() -> void
 override Npgsql.Replication.TablespaceBackupTarStream.CanRead.get -> bool
 override Npgsql.Replication.TablespaceBackupTarStream.CanSeek.get -> bool
 override Npgsql.Replication.TablespaceBackupTarStream.CanWrite.get -> bool

@@ -726,8 +726,9 @@ namespace Npgsql.Replication
                 for (var i = 0; i < nTablespaces; i++)
                 {
                     Expect<CopyOutResponseMessage>(await Connector.ReadMessage(async: true), Connector);
-                    yield return TablespaceBackupTarStream.Instance.Load(Connector, cancellationToken);
-                    await TablespaceBackupTarStream.Instance.DisposeAsync();
+                    var stream = new TablespaceBackupTarStream(Connector, cancellationToken);
+                    yield return stream;
+                    await stream.DisposeAsync();
                 }
 
                 msg = await Connector.ReadMessage(true);

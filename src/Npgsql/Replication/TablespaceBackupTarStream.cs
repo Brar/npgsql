@@ -5,7 +5,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Npgsql.BackendMessages;
-using Npgsql.Util;
 using static Npgsql.Util.Statics;
 
 namespace Npgsql.Replication
@@ -15,18 +14,14 @@ namespace Npgsql.Replication
     /// </summary>
     public sealed class TablespaceBackupTarStream : Stream, IBackupResponse, IAsyncEnumerable<TarFileStream>, IDisposable, IAsyncDisposable
     {
-
-        internal static TablespaceBackupTarStream Instance { get; } = new();
-
-        internal TablespaceBackupTarStream Load(NpgsqlConnector connector, CancellationToken baseCancellationToken)
+        internal TablespaceBackupTarStream(NpgsqlConnector connector, CancellationToken baseCancellationToken)
         {
-            Instance._connector = connector;
-            Instance._baseCancellationToken = baseCancellationToken;
-            return Instance;
+            _connector = connector;
+            _baseCancellationToken = baseCancellationToken;
         }
 
-        NpgsqlConnector _connector = default!;
-        CancellationToken _baseCancellationToken;
+        readonly NpgsqlConnector _connector = default!;
+        readonly CancellationToken _baseCancellationToken;
         bool _readingDone;
 
         BackupResponseKind IBackupResponse.Kind => BackupResponseKind.TablespaceDataMessage;
@@ -34,8 +29,9 @@ namespace Npgsql.Replication
         IAsyncEnumerator<TarFileStream> IAsyncEnumerable<TarFileStream>.GetAsyncEnumerator(CancellationToken cancellationToken)
         {
             using (NoSynchronizationContextScope.Enter())
-                return GetAsyncEnumeratorInternal(
-                    CancellationTokenSource.CreateLinkedTokenSource(_baseCancellationToken, cancellationToken).Token);
+                return GetAsyncEnumeratorInternal(_baseCancellationToken.CanBeCanceled || cancellationToken.CanBeCanceled
+                    ? CancellationTokenSource.CreateLinkedTokenSource(_baseCancellationToken, cancellationToken).Token
+                    : default);
 
             async IAsyncEnumerator<TarFileStream> GetAsyncEnumeratorInternal(CancellationToken innerCancellationToken)
             {

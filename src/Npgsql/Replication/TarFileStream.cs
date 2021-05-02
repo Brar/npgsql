@@ -1,26 +1,32 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices.ComTypes;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Npgsql.BackendMessages;
 using Npgsql.Util;
+#if !NETSTANDARD2_0
+// Hack to use UnixEpoch from .NET if available
+using static System.DateTime;
+#endif
+
 
 namespace Npgsql.Replication
 {
     /// <summary>
-    /// A read only <see cref="Stream"/> wrapping a PostgreSQl base backup file
+    /// A read only <see cref="Stream"/> wrapping a PostgreSQl base backup file in USTAR format
     /// </summary>
     public class TarFileStream : Stream
     {
 #if NETSTANDARD2_0
-        static readonly DateTime UnixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        static readonly DateTime UnixEpoch = new (1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 #endif
         internal static TarFileStream Instance = new();
 
         NpgsqlConnector _connector = default!;
-        CancellationToken _baseCancellationToken = default!;
+        CancellationToken _baseCancellationToken;
         int _length; // The length of the tar file content
         int _totalLength; // The length of the tar file content including padding
         int _currentMessageLength; // The length of the current CopyDataMessage
@@ -45,11 +51,7 @@ namespace Npgsql.Replication
             _length = ReadOctalString(12);
             _totalLength = _length + TarPaddingBytesRequired(_length);
             var mtime = ReadOctalString(12);
-#if NETSTANDARD2_0
             MTime = UnixEpoch.AddSeconds(mtime);
-#else
-                MTime = DateTime.UnixEpoch.AddSeconds(mtime);
-#endif
             ChkSum = ReadOctalString(8);
             TypeFlag = (char)buf.ReadByte();
             LinkName = ReadAsciiString(100);
@@ -191,9 +193,7 @@ namespace Npgsql.Replication
 
         /// <inheritdoc />
         public override int Read(byte[] buffer, int offset, int count)
-        {
-            return Read(new Span<byte>(buffer, offset, count));
-        }
+            => Read(new Span<byte>(buffer, offset, count));
 
 #if NETSTANDARD2_0
         /// <summary>
@@ -224,7 +224,6 @@ namespace Npgsql.Replication
 
             count = Math.Min(count, _currentMessageLength - _currentMessageRead);
 
-
             count = _connector.ReadBuffer.Read(span.Slice(0, count));
             _currentMessageRead += count;
             _read += count;
@@ -234,8 +233,56 @@ namespace Npgsql.Replication
 
         /// <inheritdoc />
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => ReadAsync(new Memory<byte>(buffer, offset, count), cancellationToken).AsTask();
+
+#if NETSTANDARD2_0
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="buffer"></param>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
+        public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+#else
+        /// <inheritdoc />
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+#endif
         {
-            return base.ReadAsync(buffer, offset, count, cancellationToken);
+            CheckDisposed();
+
+            var count = Math.Min(buffer.Length, _length - _read);
+
+            if (count == 0)
+                return new ValueTask<int>(0);
+
+            using (NoSynchronizationContextScope.Enter())
+            {
+                var compoundToken = CancellationTokenSource.CreateLinkedTokenSource(_baseCancellationToken, cancellationToken).Token;
+                return ReadAsyncInternal(this, buffer.Slice(0, count), compoundToken);
+            }
+
+            static async ValueTask<int> ReadAsyncInternal(TarFileStream stream, Memory<byte> buffer, CancellationToken cancellationToken)
+            {
+                var currentMessageBytesLeft = stream._currentMessageLength - stream._currentMessageRead;
+                if (currentMessageBytesLeft == 0)
+                {
+                    using var _ = stream._connector.StartNestedCancellableOperation(cancellationToken, stream._connector.AttemptPostgresCancellation);
+                    var msg = Statics.Expect<CopyDataMessage>(await stream._connector.ReadMessage(async: true), stream._connector);
+                    stream._currentMessageLength = currentMessageBytesLeft = msg.Length;
+                    stream._currentMessageRead = 0;
+                }
+
+                if (currentMessageBytesLeft < buffer.Length)
+                {
+                    buffer = buffer.Slice(0, currentMessageBytesLeft);
+                }
+
+                var count = await stream._connector.ReadBuffer.ReadAsync(buffer, cancellationToken);
+                stream._currentMessageRead += count;
+                stream._read += count;
+
+                return count;
+            }
         }
 
         internal bool IsDisposed { get; private set; }
