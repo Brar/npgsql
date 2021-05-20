@@ -20,6 +20,7 @@ namespace Npgsql.Replication.PgOutput
         readonly PgOutputReplicationOptions _options;
         readonly CancellationToken _baseCancellationToken;
         readonly NpgsqlLogSequenceNumber? _walLocation;
+        readonly Dictionary<uint, RelationInfo> _relationInfos = new();
 
         #region Cached messages
 
@@ -42,6 +43,7 @@ namespace Npgsql.Replication.PgOutput
         readonly StreamAbortMessage _streamAbortMessage = new();
         readonly ReadOnlyArrayBuffer<RelationMessage.Column> _relationMessageColumns = new();
         readonly ReadOnlyArrayBuffer<uint> _truncateMessageRelationIds = new();
+        readonly ReplicationDataRecord _dataRecord1;
 
         TupleData[] _tupleDataArray1 = Array.Empty<TupleData>();
         TupleData[] _tupleDataArray2 = Array.Empty<TupleData>();
@@ -60,6 +62,7 @@ namespace Npgsql.Replication.PgOutput
             _options = options;
             _baseCancellationToken = cancellationToken;
             _walLocation = walLocation;
+            _dataRecord1 = new(connection.Connector.ReadBuffer);
         }
 
         public IAsyncEnumerator<PgOutputReplicationMessage> GetAsyncEnumerator(CancellationToken cancellationToken = default)
@@ -166,9 +169,16 @@ namespace Npgsql.Replication.PgOutput
                         _relationMessageColumns[i] = new RelationMessage.Column(flags, columnName, dateTypeId, typeModifier);
                     }
 
-                    yield return _relationMessage.Populate(xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock, transactionXid,
+                    var msg = _relationMessage.Populate(xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock, transactionXid,
                         relationId, ns, relationName, relationReplicaIdentitySetting,
                         columns: _relationMessageColumns);
+
+                    if (!_relationInfos.ContainsKey(msg.RelationId))
+                        _relationInfos[msg.RelationId] = new RelationInfo(msg, _connection.Connector.TypeMapper);
+                    else
+                        _relationInfos[msg.RelationId].Update(msg, _connection.Connector.TypeMapper);
+
+                    yield return msg;
                     continue;
                 }
                 case BackendReplicationMessageCode.Type:
@@ -210,9 +220,9 @@ namespace Npgsql.Replication.PgOutput
                     var tupleDataType = (TupleType)buf.ReadByte();
                     Debug.Assert(tupleDataType == TupleType.NewTuple);
                     var numColumns = buf.ReadUInt16();
-                    var newRow = await ReadTupleDataAsync(ref _tupleDataArray1, numColumns);
                     yield return _insertMessage.Populate(xLogData.WalStart, xLogData.WalEnd, xLogData.ServerClock, transactionXid,
-                        relationId, newRow);
+                        relationId, _dataRecord1.Init(numColumns, _relationInfos[relationId]));
+                    await _dataRecord1.Cleanup();
                     continue;
                 }
                 case BackendReplicationMessageCode.Update:
