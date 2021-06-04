@@ -586,6 +586,26 @@ namespace Npgsql.Tests
         }
 
         [Test]
+        public async Task PostgreSqlVersion_ServerVersion()
+        {
+            await using var c = new NpgsqlConnection(ConnectionString);
+
+            Assert.That(() => c.PostgreSqlVersion, Throws.InvalidOperationException
+                .With.Message.EqualTo("Connection is not open"));
+
+            Assert.That(() => c.ServerVersion, Throws.InvalidOperationException
+                .With.Message.EqualTo("Connection is not open"));
+
+            await c.OpenAsync();
+
+            var backendVersionString = await c.ExecuteScalarAsync("SHOW server_version") as string;
+            var backendVersion = Version.Parse(backendVersionString!);
+
+            Assert.That(c.PostgreSqlVersion, Is.EqualTo(backendVersion));
+            Assert.That(c.ServerVersion, Is.EqualTo(backendVersionString));
+        }
+
+        [Test]
         public void SetConnectionString()
         {
             using var conn = new NpgsqlConnection();

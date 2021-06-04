@@ -160,6 +160,12 @@ namespace Npgsql.Replication
         /// </summary>
         public Version PostgreSqlVersion => _npgsqlConnection.PostgreSqlVersion;
 
+        /// <summary>
+        /// PostgreSQL server version.
+        /// This can only be called when there is an active connection.
+        /// </summary>
+        public string ServerVersion => _npgsqlConnection.ServerVersion;
+
         internal NpgsqlConnector Connector
             => _npgsqlConnection.Connector ??
                throw new InvalidOperationException($"The {Connector} property can only be used when there is an active connection");

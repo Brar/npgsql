@@ -38,6 +38,7 @@ Npgsql.NpgsqlCopyTextReader.DisposeAsync() -> System.Threading.Tasks.ValueTask
 Npgsql.PhysicalOpenAsyncCallback
 Npgsql.PhysicalOpenCallback
 Npgsql.Replication.ReplicationConnection.PostgreSqlVersion.get -> System.Version!
+Npgsql.Replication.ReplicationConnection.ServerVersion.get -> string!
 NpgsqlTypes.NpgsqlTsQuery.Write(System.Text.StringBuilder! stringBuilder) -> void
 override Npgsql.NpgsqlRawCopyStream.DisposeAsync() -> System.Threading.Tasks.ValueTask
 override NpgsqlTypes.NpgsqlTsQuery.Equals(object? obj) -> bool
