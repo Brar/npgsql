@@ -599,6 +599,8 @@ namespace Npgsql.Tests
             await c.OpenAsync();
 
             var backendVersionString = await c.ExecuteScalarAsync("SHOW server_version") as string;
+            // Not part of the test. Added to investigate a weird test failure on CI ubuntu that isn't reproducible locally
+            Assert.That(backendVersionString, Does.Match("^\\d{1,2}\\.\\d{1,2}(?:\\.\\d{1,2})?$"));
             var backendVersion = Version.Parse(backendVersionString!);
 
             Assert.That(c.PostgreSqlVersion, Is.EqualTo(backendVersion));
