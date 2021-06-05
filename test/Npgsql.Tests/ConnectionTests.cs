@@ -598,8 +598,11 @@ namespace Npgsql.Tests
 
             await c.OpenAsync();
 
-            var backendVersionString = await c.ExecuteScalarAsync("SHOW server_version") as string;
-            // Not part of the test. Added to investigate a weird test failure on CI ubuntu that isn't reproducible locally
+            var backendVersionString = (await c.ExecuteScalarAsync("SHOW server_version") as string)
+                !.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0].Trim();
+            // The following assertion is not part of the proper test. It is included to make sure
+            // that a possible test failure isn't happening because we failed to extract the server
+            // version from the 'SHOW server_version' result
             Assert.That(backendVersionString, Does.Match("^\\d{1,2}\\.\\d{1,2}(?:\\.\\d{1,2})?$"));
             var backendVersion = Version.Parse(backendVersionString!);
 
