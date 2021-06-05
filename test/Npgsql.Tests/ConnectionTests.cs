@@ -599,11 +599,11 @@ namespace Npgsql.Tests
             await c.OpenAsync();
 
             var backendVersionString = (await c.ExecuteScalarAsync("SHOW server_version") as string)
-                !.Split(' ', StringSplitOptions.RemoveEmptyEntries)[0].Trim();
+                !.Split(new []{' ', 'b'}, StringSplitOptions.RemoveEmptyEntries)[0].Trim() + ".0";
             // The following assertion is not part of the proper test. It is included to make sure
             // that a possible test failure isn't happening because we failed to extract the server
             // version from the 'SHOW server_version' result
-            Assert.That(backendVersionString, Does.Match("^\\d{1,2}\\.\\d{1,2}(?:\\.\\d{1,2})?$"));
+            Assert.That(backendVersionString, Does.Match("^\\d{1,2}\\.\\d{1,2}(?:\\.\\d{1,2}(?:\\.\\d{1,2})?)?$"));
             var backendVersion = Version.Parse(backendVersionString!);
 
             Assert.That(c.PostgreSqlVersion, Is.EqualTo(backendVersion));
