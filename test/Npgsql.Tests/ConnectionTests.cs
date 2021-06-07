@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
 using System.IO;
@@ -10,6 +11,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Npgsql.Internal;
+using Npgsql.PostgresTypes;
 using Npgsql.Tests.Support;
 using NUnit.Framework;
 using static Npgsql.Tests.TestUtil;
@@ -656,6 +658,8 @@ namespace Npgsql.Tests
             Assert.That(conn.DataSource, Is.EqualTo($"tcp://{conn.Host}:{conn.Port}"));
         }
 
+        #region Server version
+
         [Test]
         public async Task PostgreSqlVersion_ServerVersion()
         {
@@ -668,18 +672,165 @@ namespace Npgsql.Tests
                 .With.Message.EqualTo("Connection is not open"));
 
             await c.OpenAsync();
+            var backendVersionString = await c.ExecuteScalarAsync("SHOW server_version") as string;
 
-            var backendVersionString = (await c.ExecuteScalarAsync("SHOW server_version") as string)
-                !.Split(new []{' ', 'b'}, StringSplitOptions.RemoveEmptyEntries)[0].Trim() + ".0";
-            // The following assertion is not part of the proper test. It is included to make sure
-            // that a possible test failure isn't happening because we failed to extract the server
-            // version from the 'SHOW server_version' result
-            Assert.That(backendVersionString, Does.Match("^\\d{1,2}\\.\\d{1,2}(?:\\.\\d{1,2}(?:\\.\\d{1,2})?)?$"));
-            var backendVersion = Version.Parse(backendVersionString!);
-
-            Assert.That(c.PostgreSqlVersion, Is.EqualTo(backendVersion));
-            Assert.That(c.ServerVersion, Is.EqualTo(backendVersionString));
+            Assert.That(backendVersionString, Does.Contain(c.PostgreSqlVersion.ToString()));
+            Assert.That(backendVersionString, Does.Contain(c.ServerVersion));
         }
+
+        [TestCase("X13.0")]
+        [TestCase("13.")]
+        [TestCase("13.1.")]
+        [TestCase("13.1.1.")]
+        [TestCase("13.1.1.1.")]
+        [TestCase("13.1.1.1.1")]
+        public void ParseVersionFails(string versionString)
+        {
+            Assert.That(()=> TestDbInfo.ParseServerVersion(versionString), Throws.Exception);
+            Assert.That(()=> TestDbInfo.ParseVersionString(versionString), Throws.Exception);
+        }
+
+        [TestCaseSource(nameof(ParseVersionSucceedsData))]
+        public (Version Version, string ServerVersion, string ReleaseType, int? PreReleaseVersion)
+            ParseVersionSucceeds(string versionString)
+        {
+            var version = TestDbInfo.ParseServerVersion(versionString);
+            var versionInfo = TestDbInfo.ParseVersionString(versionString);
+
+            // Make sure that the new version parser creates the same version as the old one
+            Assert.That(version, Is.EqualTo(versionInfo.Version));
+            return (versionInfo.Version, versionInfo.ServerVersion, versionInfo.ReleaseType.ToString(), versionInfo.PreReleaseVersion);
+        }
+
+        static IEnumerable<TestCaseData> ParseVersionSucceedsData
+        {
+            get
+            {
+                yield return new TestCaseData("13.3")
+                    .Returns((new Version(13,3), "13.3", ReleaseType.Release.ToString(), (int?)null));
+
+                yield return new TestCaseData("13.3X")
+                    .Returns((new Version(13,3), "13.3", ReleaseType.Release.ToString(), (int?)null));
+
+                yield return new TestCaseData("9.6.4")
+                    .Returns((new Version(9,6,4), "9.6.4", ReleaseType.Release.ToString(), (int?)null));
+
+                yield return new TestCaseData("9.6.4X")
+                    .Returns((new Version(9,6,4), "9.6.4", ReleaseType.Release.ToString(), (int?)null));
+
+                yield return new TestCaseData("9.5alpha2")
+                    .Returns((new Version(9,5), "9.5alpha2", ReleaseType.Alpha.ToString(), 2));
+
+                yield return new TestCaseData("9.5alpha2X")
+                    .Returns((new Version(9,5), "9.5alpha2", ReleaseType.Alpha.ToString(), 2));
+
+                yield return new TestCaseData("9.5devel")
+                    .Returns((new Version(9,5), "9.5devel", ReleaseType.Devel.ToString(), (int?)null));
+
+                yield return new TestCaseData("9.5develX")
+                    .Returns((new Version(9,5), "9.5devel", ReleaseType.Devel.ToString(), (int?)null));
+
+                yield return new TestCaseData("9.5deveX")
+                    .Returns((new Version(9,5), "9.5", ReleaseType.Release.ToString(), (int?)null));
+
+                yield return new TestCaseData("9.4beta3")
+                    .Returns((new Version(9,4), "9.4beta3", ReleaseType.Beta.ToString(), 3));
+
+                yield return new TestCaseData("9.4rc1")
+                    .Returns((new Version(9,4), "9.4rc1", ReleaseType.ReleaseCandidate.ToString(), 1));
+
+                yield return new TestCaseData("9.4rc1X")
+                    .Returns((new Version(9,4), "9.4rc1", ReleaseType.ReleaseCandidate.ToString(), 1));
+
+                yield return new TestCaseData("13devel")
+                    .Returns((new Version(13,0), "13devel", ReleaseType.Devel.ToString(), (int?)null));
+
+                yield return new TestCaseData("13beta1")
+                    .Returns((new Version(13,0), "13beta1", ReleaseType.Beta.ToString(), 1));
+
+                // The following should not occur as PostgreSQL version string in the wild these days but we support it.
+                yield return new TestCaseData("13")
+                    .Returns((new Version(13,0), "13", ReleaseType.Release.ToString(), (int?)null));
+
+                yield return new TestCaseData("13X")
+                    .Returns((new Version(13,0), "13", ReleaseType.Release.ToString(), (int?)null));
+
+                yield return new TestCaseData("13alpha1")
+                    .Returns((new Version(13,0), "13alpha1", ReleaseType.Alpha.ToString(), 1));
+
+                yield return new TestCaseData("13alpha")
+                    .Returns((new Version(13,0), "13alpha", ReleaseType.Alpha.ToString(), (int?)null));
+
+                yield return new TestCaseData("13alphX")
+                    .Returns((new Version(13,0), "13", ReleaseType.Release.ToString(), (int?)null));
+
+                yield return new TestCaseData("13beta")
+                    .Returns((new Version(13,0), "13beta", ReleaseType.Beta.ToString(), (int?)null));
+
+                yield return new TestCaseData("13betX")
+                    .Returns((new Version(13,0), "13", ReleaseType.Release.ToString(), (int?)null));
+
+                yield return new TestCaseData("13rc1")
+                    .Returns((new Version(13,0), "13rc1", ReleaseType.ReleaseCandidate.ToString(), 1));
+
+                yield return new TestCaseData("13rc")
+                    .Returns((new Version(13,0), "13rc", ReleaseType.ReleaseCandidate.ToString(), (int?)null));
+
+                yield return new TestCaseData("13rX")
+                    .Returns((new Version(13,0), "13", ReleaseType.Release.ToString(), (int?)null));
+
+                yield return new TestCaseData(" 13.3")
+                    .Returns((new Version(13,3), "13.3", ReleaseType.Release.ToString(), (int?)null));
+
+                yield return new TestCaseData("99999.99999.99999.99999")
+                    .Returns((new Version(99999,99999,99999,99999), "99999.99999.99999.99999", ReleaseType.Release.ToString(), (int?)null));
+
+                yield return new TestCaseData("99999.99999.99999.99999X")
+                    .Returns((new Version(99999,99999,99999,99999), "99999.99999.99999.99999", ReleaseType.Release.ToString(), (int?)null));
+
+                yield return new TestCaseData("99999.99999.99999.99999devel")
+                    .Returns((new Version(99999,99999,99999,99999), "99999.99999.99999.99999devel", ReleaseType.Devel.ToString(), (int?)null));
+
+                yield return new TestCaseData("99999.99999.99999devel")
+                    .Returns((new Version(99999,99999,99999), "99999.99999.99999devel", ReleaseType.Devel.ToString(), (int?)null));
+
+                yield return new TestCaseData("99999.99999.99999.99999alpha99999")
+                    .Returns((new Version(99999,99999,99999,99999), "99999.99999.99999.99999alpha99999", ReleaseType.Alpha.ToString(), 99999));
+
+                yield return new TestCaseData("99999.99999.99999alpha99999")
+                    .Returns((new Version(99999,99999,99999), "99999.99999.99999alpha99999", ReleaseType.Alpha.ToString(), 99999));
+
+                yield return new TestCaseData("99999.99999.99999.99999beta99999")
+                    .Returns((new Version(99999,99999,99999,99999), "99999.99999.99999.99999beta99999", ReleaseType.Beta.ToString(), 99999));
+
+                yield return new TestCaseData("99999.99999.99999beta99999")
+                    .Returns((new Version(99999,99999,99999), "99999.99999.99999beta99999", ReleaseType.Beta.ToString(), 99999));
+
+                yield return new TestCaseData("99999.99999.99999rc99999")
+                    .Returns((new Version(99999,99999,99999), "99999.99999.99999rc99999", ReleaseType.ReleaseCandidate.ToString(), 99999));
+
+                yield return new TestCaseData("99999.99999.99999.99999rc99999")
+                    .Returns((new Version(99999,99999,99999,99999), "99999.99999.99999.99999rc99999", ReleaseType.ReleaseCandidate.ToString(), 99999));
+            }
+        }
+
+        class TestDbInfo : NpgsqlDatabaseInfo
+        {
+            public TestDbInfo(string host, int port, string databaseName, Version version) : base(host, port, databaseName, version)
+                => throw new NotImplementedException();
+
+            protected override IEnumerable<PostgresType> GetTypes()
+                => throw new NotImplementedException();
+
+            public new static Version ParseServerVersion(string versionString)
+                => NpgsqlDatabaseInfo.ParseServerVersion(versionString);
+
+            public new static (Version Version, string ServerVersion, ReleaseType ReleaseType, int? PreReleaseVersion)
+                ParseVersionString(string versionString)
+                => NpgsqlDatabaseInfo.ParseVersionString(versionString);
+        }
+
+        #endregion Server version
 
         [Test]
         public void SetConnectionString()
