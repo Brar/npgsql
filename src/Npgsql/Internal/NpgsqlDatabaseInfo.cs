@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Npgsql.PostgresTypes;
 using Npgsql.Util;
@@ -24,6 +25,9 @@ namespace Npgsql.Internal
             new PostgresDatabaseInfoFactory()
         };
 
+        readonly string? _serverVersion;
+        readonly string? _portableServerVersion;
+
         #endregion Fields
 
         #region General database info
@@ -32,19 +36,55 @@ namespace Npgsql.Internal
         /// The hostname of IP address of the database.
         /// </summary>
         public string Host { get; }
+
         /// <summary>
         /// The TCP port of the database.
         /// </summary>
         public int Port { get; }
+
         /// <summary>
         /// The database name.
         /// </summary>
         public string Name { get; }
+
         /// <summary>
-        /// The version of the PostgreSQL database we're connected to, as reported in the "server_version" parameter.
+        /// The version of the PostgreSQL database we're connected to.
+        /// In case of a development or pre-release version this field will contain
+        /// the version of the next version to be released from this branch.
         /// Exposed via <see cref="NpgsqlConnection.PostgreSqlVersion"/>.
         /// </summary>
         public Version Version { get; }
+
+        /// <summary>
+        /// The server version of the PostgreSQL database we're connected to.
+        /// Exposed via <see cref="NpgsqlConnection.ServerVersion"/>.
+        /// </summary>
+        public string ServerVersion => _serverVersion ?? Version.ToString();
+
+        /// <summary>
+        /// The server version of the PostgreSQL database we're connected to.
+        /// Exposed via <see cref="NpgsqlConnection.ServerVersion"/>.
+        /// </summary>
+        internal string PortableServerVersion => _portableServerVersion ?? Version.ToString();
+
+        /// <summary>
+        /// The pre-release version of the PostgreSQL database we're connected to
+        /// (e. g. '3' for 9.4beta3 or '1' for 9.4rc1) if it is an alpha, beta or
+        /// release candidate version; otherwise <see langword="null"/>.
+        /// </summary>
+        internal int? PreReleaseVersion { get; }
+
+        /// <summary>
+        /// <see langword="true"/> if the PostgreSQL database we're
+        /// connected to is a release; otherwise <see langword="false"/>.
+        /// </summary>
+        internal bool IsRelease => ReleaseType == ReleaseType.Release;
+
+        /// <summary>
+        /// <see langword="true"/> if the PostgreSQL database we're
+        /// connected to is a development version; otherwise <see langword="false"/>.
+        /// </summary>
+        internal ReleaseType ReleaseType { get; }
 
         #endregion General database info
 
@@ -139,6 +179,20 @@ namespace Npgsql.Internal
             Port = port;
             Name = databaseName;
             Version = version;
+            _serverVersion = null;
+            _portableServerVersion = null;
+        }
+
+        /// <summary>
+        /// Initializes the instance of <see cref="NpgsqlDatabaseInfo"/>.
+        /// </summary>
+        private protected NpgsqlDatabaseInfo(string host, int port, string databaseName, string versionString)
+        {
+            Host = host;
+            Port = port;
+            Name = databaseName;
+            _serverVersion = versionString;
+            (Version, _portableServerVersion, ReleaseType, PreReleaseVersion) = ParseVersionString(versionString);
         }
 
         internal void ProcessTypes()
@@ -194,19 +248,429 @@ namespace Npgsql.Internal
         /// </summary>
         protected static Version ParseServerVersion(string value)
         {
-            var versionString = value.Trim();
-            for (var idx = 0; idx != versionString.Length; ++idx)
+            var versionSpan = value.AsSpan().TrimStart();
+            for (var idx = 0; idx != versionSpan.Length; ++idx)
             {
-                var c = value[idx];
+                var c = versionSpan[idx];
                 if (!char.IsDigit(c) && c != '.')
                 {
-                    versionString = versionString.Substring(0, idx);
+                    versionSpan = versionSpan.Slice(0, idx);
                     break;
                 }
             }
-            if (!versionString.Contains("."))
-                versionString += ".0";
-            return new Version(versionString);
+            if (!versionSpan.Contains(".".AsSpan(), StringComparison.Ordinal))
+                return new Version(versionSpan.ToString() + ".0");
+
+            return new Version(versionSpan.ToString());
+        }
+
+        /// <summary>
+        /// Takes the PostgreSQL server_version return value and extracts the
+        /// version string including the beta and development status
+        /// </summary>
+        internal static (Version Version, string PortableServerVersion, ReleaseType ReleaseType, int? PreReleaseVersion)
+            ParseVersionString(string versionString)
+        {
+            var str = versionString.AsSpan();
+            var state = VersionParseState.Initial;
+            var serverVersionSliceStart = -1;
+            var digitsSliceStart = -1;
+            var digitsCount = 0;
+            var major = -1;
+            var minor = -1;
+            var build = -1;
+            var revision = -1;
+            var releaseType = (ReleaseType)(-1);
+            for (var idx = 0; idx < str.Length; idx++)
+            {
+                var c = str[idx];
+                switch (state)
+                {
+                case VersionParseState.Initial:
+                {
+                    if (char.IsWhiteSpace(c))
+                        continue;
+                    if (!char.IsDigit(c))
+                        throw FormatException(str, idx);
+
+                    state = VersionParseState.MajorDigitsRead;
+                    serverVersionSliceStart = idx;
+                    digitsSliceStart = idx;
+                    digitsCount = 1;
+                    continue;
+                }
+                case VersionParseState.MajorDigitsRead:
+                {
+                    switch (c)
+                    {
+                    case '.':
+                        state = VersionParseState.MinorDigitsStart;
+                        break;
+                    case 'a':
+                        state = VersionParseState.AlphaStringRead;
+                        break;
+                    case 'b':
+                        state = VersionParseState.BetaStringRead;
+                        break;
+                    case 'd':
+                        state = VersionParseState.DevelStringRead;
+                        break;
+                    case 'r':
+                        state = VersionParseState.RcStringRead;
+                        break;
+                    default:
+                        if (char.IsDigit(c))
+                        {
+                            digitsCount++;
+                            continue;
+                        }
+                        // Done.
+                        // We have major and the next character doesn't indicate a build number,
+                        // a beta or a development version 
+                        return (Version: CreateVersion(ParseInt(str.Slice(digitsSliceStart, digitsCount))),
+                            PortableServerVersion: str.Slice(serverVersionSliceStart, idx).ToString(),
+                            ReleaseType: ReleaseType.Release,
+                            PreReleaseVersion: null);
+                    }
+
+                    major = ParseInt(str.Slice(digitsSliceStart, digitsCount));
+                    continue;
+                }
+                case VersionParseState.MinorDigitsStart:
+                {
+                    if (!char.IsDigit(c))
+                        throw FormatException(str, idx);
+                    state = VersionParseState.MinorDigitsRead;
+                    digitsSliceStart = idx;
+                    digitsCount = 1;
+                    continue;
+                }
+                case VersionParseState.MinorDigitsRead:
+                {
+                    switch (c)
+                    {
+                    case '.':
+                        state = VersionParseState.BuildDigitsStart;
+                        break;
+                    case 'a':
+                        state = VersionParseState.AlphaStringRead;
+                        break;
+                    case 'b':
+                        state = VersionParseState.BetaStringRead;
+                        break;
+                    case 'd':
+                        state = VersionParseState.DevelStringRead;
+                        break;
+                    case 'r':
+                        state = VersionParseState.RcStringRead;
+                        break;
+                    default:
+                        if (char.IsDigit(c))
+                        {
+                            digitsCount++;
+                            continue;
+                        }
+
+                        // Done.
+                        // We have major and minor and the next character doesn't indicate a build number,
+                        // a pre-release or a development version 
+                        return (Version: CreateVersion(major, ParseInt(str.Slice(digitsSliceStart, digitsCount))),
+                            PortableServerVersion: str.Slice(serverVersionSliceStart, idx).ToString(),
+                            ReleaseType: ReleaseType.Release,
+                            PreReleaseVersion: null);
+                    }
+
+                    minor = ParseInt(str.Slice(digitsSliceStart, digitsCount));
+                    continue;
+                }
+                case VersionParseState.BuildDigitsStart:
+                {
+                    if (!char.IsDigit(c))
+                        throw FormatException(str, idx);
+                    state = VersionParseState.BuildDigitsRead;
+                    digitsSliceStart = idx;
+                    digitsCount = 1;
+                    continue;
+                }
+                case VersionParseState.BuildDigitsRead:
+                {
+                    switch (c)
+                    {
+                    case '.':
+                        state = VersionParseState.RevisionDigitsStart;
+                        break;
+                    case 'a':
+                        state = VersionParseState.AlphaStringRead;
+                        break;
+                    case 'b':
+                        state = VersionParseState.BetaStringRead;
+                        break;
+                    case 'd':
+                        state = VersionParseState.DevelStringRead;
+                        break;
+                    case 'r':
+                        state = VersionParseState.RcStringRead;
+                        break;
+                    default:
+                        if (char.IsDigit(c))
+                        {
+                            digitsCount++;
+                            continue;
+                        }
+
+                        // Done.
+                        // We have major, minor and build and the next character doesn't indicate
+                        // a pre-release or a development version
+                        // We don't expect a revision number since PostgreSQL doesn't use them
+                        return (Version: CreateVersion(major, minor, ParseInt(str.Slice(digitsSliceStart, digitsCount))),
+                            PortableServerVersion: str.Slice(serverVersionSliceStart, idx).ToString(),
+                            ReleaseType: ReleaseType.Release,
+                            PreReleaseVersion: null);
+                    }
+
+                    build = ParseInt(str.Slice(digitsSliceStart, digitsCount));
+                    continue;
+                }
+                case VersionParseState.RevisionDigitsStart:
+                {
+                    if (!char.IsDigit(c))
+                        throw FormatException(str, idx);
+                    state = VersionParseState.RevisionDigitsRead;
+                    digitsSliceStart = idx;
+                    digitsCount = 1;
+                    continue;
+                }
+                case VersionParseState.RevisionDigitsRead:
+                {
+                    switch (c)
+                    {
+                    case '.':
+                        throw FormatException(str, idx);
+                    case 'a':
+                        state = VersionParseState.AlphaStringRead;
+                        break;
+                    case 'b':
+                        state = VersionParseState.BetaStringRead;
+                        break;
+                    case 'd':
+                        state = VersionParseState.DevelStringRead;
+                        break;
+                    case 'r':
+                        state = VersionParseState.RcStringRead;
+                        break;
+                    default:
+                        if (char.IsDigit(c))
+                        {
+                            digitsCount++;
+                            continue;
+                        }
+
+                        // Done.
+                        // We have major, minor, build and revision and the next character doesn't indicate
+                        // a pre-release or a development version
+                        // We don't expect a revision number since PostgreSQL doesn't use them
+                        return (Version: CreateVersion(major, minor, build, ParseInt(str.Slice(digitsSliceStart, digitsCount))),
+                            PortableServerVersion: str.Slice(serverVersionSliceStart, idx).ToString(),
+                            ReleaseType: ReleaseType.Release,
+                            PreReleaseVersion: null);
+                    }
+
+                    revision = ParseInt(str.Slice(digitsSliceStart, digitsCount));
+                    continue;
+                }
+                case VersionParseState.DevelStringRead:
+                {
+                    var serverVersionSliceSavePoint = idx - 1;
+                    // If our attempt to read the string 'devel' failed we return
+                    // the version we've parsed already
+                    if (c != 'e'
+                        || ++idx >= str.Length || str[idx] != 'v'
+                        || ++idx >= str.Length || str[idx] != 'e'
+                        || ++idx >= str.Length || str[idx] != 'l')
+                        return (Version: CreateVersion(major, minor),
+                            PortableServerVersion: str.Slice(serverVersionSliceStart, serverVersionSliceSavePoint).ToString(),
+                            ReleaseType: ReleaseType.Release,
+                            PreReleaseVersion: null);
+
+                    return (Version: CreateVersion(major, minor, build, revision),
+                        PortableServerVersion: str.Slice(serverVersionSliceStart, idx + 1).ToString(),
+                        ReleaseType: ReleaseType.Devel,
+                        PreReleaseVersion: null);
+                }
+                case VersionParseState.AlphaStringRead:
+                {
+                    var serverVersionSliceSavePoint = idx - 1;
+                    if (c != 'l'
+                        || ++idx == str.Length || str[idx] != 'p'
+                        || ++idx == str.Length || str[idx] != 'h'
+                        || ++idx == str.Length || str[idx] != 'a')
+                    {
+                        // If our attempt to read the string 'alpha' failed we return
+                        // the version we've parsed already
+                        return (Version: CreateVersion(major, minor, build, revision),
+                            PortableServerVersion: str.Slice(serverVersionSliceStart, serverVersionSliceSavePoint).ToString(),
+                            ReleaseType: ReleaseType.Release,
+                            PreReleaseVersion: null);
+                    }
+
+                    // The alpha version doesn't have the expected digit.
+                    // Succeed anyways and set PreReleaseVersion to null
+                    if (++idx == str.Length || !char.IsDigit(str[idx]))
+                        return (Version: CreateVersion(major, minor, build, revision),
+                            PortableServerVersion: str.Slice(serverVersionSliceStart, idx).ToString(),
+                            ReleaseType: ReleaseType.Alpha,
+                            PreReleaseVersion: null);
+
+                    state = VersionParseState.PreReleaseVersionDigitsRead;
+                    releaseType = ReleaseType.Alpha;
+                    digitsSliceStart = idx;
+                    digitsCount = 1;
+                    continue;
+                }
+                case VersionParseState.BetaStringRead:
+                {
+                    var serverVersionSliceSavePoint = idx - 1;
+                    if (c != 'e'
+                        || ++idx == str.Length || str[idx] != 't'
+                        || ++idx == str.Length || str[idx] != 'a')
+                    {
+                        // If our attempt to read the string 'beta' failed we return
+                        // the version we've parsed already
+                        return (Version: CreateVersion(major, minor, build, revision),
+                            PortableServerVersion: str.Slice(serverVersionSliceStart, serverVersionSliceSavePoint).ToString(),
+                            ReleaseType: ReleaseType.Release,
+                            PreReleaseVersion: null);
+                    }
+
+                    // The beta version doesn't have the expected digit.
+                    // Succeed anyways and set PreReleaseVersion to null
+                    if (++idx == str.Length || !char.IsDigit(str[idx]))
+                        return (Version: CreateVersion(major, minor, build, revision),
+                            PortableServerVersion: str.Slice(serverVersionSliceStart, idx).ToString(),
+                            ReleaseType: ReleaseType.Beta,
+                            PreReleaseVersion: null);
+
+                    state = VersionParseState.PreReleaseVersionDigitsRead;
+                    releaseType = ReleaseType.Beta;
+                    digitsSliceStart = idx;
+                    digitsCount = 1;
+                    continue;
+                }
+                case VersionParseState.RcStringRead:
+                {
+                    if (c != 'c')
+                    {
+                        // If our attempt to read the string 'rc' failed we return
+                        // the version we've parsed already
+                        return (Version: CreateVersion(major, minor, build, revision),
+                            PortableServerVersion: str.Slice(serverVersionSliceStart, idx - 1).ToString(),
+                            ReleaseType: ReleaseType.Release,
+                            PreReleaseVersion: null);
+                    }
+
+                    // The release candidate doesn't have the expected digit.
+                    // Succeed anyways and set PreReleaseVersion to null
+                    if (++idx == str.Length || !char.IsDigit(str[idx]))
+                        return (Version: CreateVersion(major, minor, build, revision),
+                            PortableServerVersion: str.Slice(serverVersionSliceStart, idx).ToString(),
+                            ReleaseType: ReleaseType.ReleaseCandidate,
+                            PreReleaseVersion: null);
+
+                    state = VersionParseState.PreReleaseVersionDigitsRead;
+                    releaseType = ReleaseType.ReleaseCandidate;
+                    digitsSliceStart = idx;
+                    digitsCount = 1;
+                    continue;
+                }
+                case VersionParseState.PreReleaseVersionDigitsRead:
+                {
+                    if (char.IsDigit(c))
+                    {
+                        digitsCount++;
+                        continue;
+                    }
+
+                    return (Version: CreateVersion(major, minor, build, revision),
+                        PortableServerVersion: str.Slice(serverVersionSliceStart, idx).ToString(),
+                        ReleaseType: releaseType,
+                        PreReleaseVersion: ParseInt(str.Slice(digitsSliceStart, digitsCount)));
+                }
+                default:
+                    throw FormatException(str, idx);
+                }
+            }
+
+            // The version string may end while we are reading digits
+            // in which case we parse the digits we already have
+            switch (state)
+            {
+            case VersionParseState.MajorDigitsRead:
+                return (Version: CreateVersion(ParseInt(str.Slice(digitsSliceStart))),
+                    PortableServerVersion: str.Slice(serverVersionSliceStart).ToString(),
+                    ReleaseType: ReleaseType.Release,
+                    PreReleaseVersion: null);
+            case VersionParseState.MinorDigitsRead:
+                return (Version: CreateVersion(major, ParseInt(str.Slice(digitsSliceStart))),
+                    PortableServerVersion: str.Slice(serverVersionSliceStart).ToString(),
+                    ReleaseType: ReleaseType.Release,
+                    PreReleaseVersion: null);
+            case VersionParseState.BuildDigitsRead:
+                return (Version: CreateVersion(major, minor, ParseInt(str.Slice(digitsSliceStart))),
+                    PortableServerVersion: str.Slice(serverVersionSliceStart).ToString(),
+                    ReleaseType: ReleaseType.Release,
+                    PreReleaseVersion: null);
+            case VersionParseState.RevisionDigitsRead:
+                return (Version: CreateVersion(major, minor, build, ParseInt(str.Slice(digitsSliceStart))),
+                    PortableServerVersion: str.Slice(serverVersionSliceStart).ToString(),
+                    ReleaseType: ReleaseType.Release,
+                    PreReleaseVersion: null);
+            case VersionParseState.PreReleaseVersionDigitsRead:
+                return (Version: CreateVersion(major, minor, build, revision),
+                    PortableServerVersion: str.Slice(serverVersionSliceStart).ToString(),
+                    ReleaseType: releaseType,
+                    PreReleaseVersion: ParseInt(str.Slice(digitsSliceStart)));
+            default:
+                throw new FormatException($"Failed to parse the server version string '{str.ToString()}'.");
+            }
+
+            static FormatException FormatException(ReadOnlySpan<char> str, int index)
+                => new($"Failed to parse the server version string '{str.ToString()}'. Unexpected character '{str[index]}' at index {index}.");
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            static Version CreateVersion(int major, int minor = 0, int build = -1, int revision = -1)
+                => revision > -1
+                    ? new(major, minor, build, revision)
+                    : build > -1
+                        ? new(major, minor, build)
+                        : minor > -1
+                            ? new(major, minor)
+                            : new(major, 0);
+
+            // Put the .NET Standard 2.0 ugliness in one place
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            static int ParseInt(ReadOnlySpan<char> str)
+                => int.Parse(str
+#if NETSTANDARD2_0
+                        .ToString()
+#endif
+                );
+        }
+
+        enum VersionParseState
+        {
+            Initial,
+            MajorDigitsRead,
+            MinorDigitsStart,
+            MinorDigitsRead,
+            BuildDigitsStart,
+            BuildDigitsRead,
+            RevisionDigitsStart,
+            RevisionDigitsRead,
+            DevelStringRead,
+            AlphaStringRead,
+            BetaStringRead,
+            RcStringRead,
+            PreReleaseVersionDigitsRead,
         }
 
         #endregion Misc
@@ -257,5 +721,14 @@ namespace Npgsql.Internal
         }
 
         #endregion Factory management
+    }
+
+    enum ReleaseType
+    {
+        Release,
+        Alpha,
+        Beta,
+        ReleaseCandidate,
+        Devel
     }
 }
