@@ -27,7 +27,7 @@ namespace Npgsql.Internal
 
         internal readonly NpgsqlConnector Connector;
 
-        internal Stream Underlying { private get; set; }
+        internal Stream Underlying { get; set; }
 
         readonly Socket? _underlyingSocket;
 
