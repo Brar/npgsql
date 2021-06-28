@@ -16,17 +16,17 @@ namespace Npgsql.Tests.Replication
         protected ulong ProtocolVersion { get; }
         protected ReplicationDataMode DataMode { get; }
         protected TransactionStreamingMode TransactionMode { get; }
-        protected bool IsBinaryMode => DataMode == ReplicationDataMode.BinaryReplicationDataMode;
-        protected bool IsStreaming => TransactionMode == TransactionStreamingMode.StreamingTransactionMode;
+        protected bool IsBinaryMode => DataMode == ReplicationDataMode.BinaryReplicationData;
+        protected bool IsStreaming => TransactionMode == TransactionStreamingMode.StreamingTransaction;
 
-        bool? Binary => DataMode == ReplicationDataMode.BinaryReplicationDataMode
+        bool? Binary => DataMode == ReplicationDataMode.BinaryReplicationData
             ? true
-            : DataMode == ReplicationDataMode.TextReplicationDataMode
+            : DataMode == ReplicationDataMode.TextReplicationData
                 ? false
                 : null;
-        bool? Streaming => TransactionMode == TransactionStreamingMode.StreamingTransactionMode
+        bool? Streaming => TransactionMode == TransactionStreamingMode.StreamingTransaction
             ? true
-            : TransactionMode == TransactionStreamingMode.NonStreamingTransactionMode
+            : TransactionMode == TransactionStreamingMode.NonStreamingTransaction
                 ? false
                 : null;
 
@@ -159,14 +159,14 @@ namespace Npgsql.Tests.Replication
     }
     public enum TransactionStreamingMode
     {
-        DefaultTransactionMode,
-        NonStreamingTransactionMode,
-        StreamingTransactionMode,
+        DefaultTransaction,
+        NonStreamingTransaction,
+        StreamingTransaction,
     }
     public enum ReplicationDataMode
     {
-        DefaultReplicationDataMode,
-        TextReplicationDataMode,
-        BinaryReplicationDataMode,
+        DefaultReplicationData,
+        TextReplicationData,
+        BinaryReplicationData,
     }
 }

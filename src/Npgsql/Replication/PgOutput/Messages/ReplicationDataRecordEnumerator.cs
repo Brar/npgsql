@@ -21,8 +21,7 @@ namespace Npgsql.Replication.PgOutput.Messages
         internal ReplicationDataRecordEnumerator(NpgsqlReadBuffer readBuffer)
             => _readBuffer = readBuffer;
 
-        // This is part of the hack to abuse a NpgsqlReadBuffer as
-        // buffer.
+        // Hack: Detect buffering by looking at the underlying stream
         // ReSharper disable once ConditionIsAlwaysTrueOrFalse
         bool IsBuffered => _readBuffer.Underlying is MemoryStream;
 
@@ -99,19 +98,13 @@ namespace Npgsql.Replication.PgOutput.Messages
 
         public void Dispose()
         {
-            if (!_disposed) while (MoveNext())
-            {
-                // Do nothing, just iterate the enumerator
-            }
+            if (!_disposed) while (MoveNext()) { /* Do nothing, just iterate the enumerator */ }
             _disposed = true;
         }
 
         public async ValueTask DisposeAsync()
         {
-            if (!_disposed) while (await MoveNextAsync())
-            {
-                // Do nothing, just iterate the enumerator
-            }
+            if (!_disposed) while (await MoveNextAsync()) { /* Do nothing, just iterate the enumerator */ }
             _disposed = true;
         }
 

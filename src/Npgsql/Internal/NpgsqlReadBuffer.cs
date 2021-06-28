@@ -541,9 +541,7 @@ namespace Npgsql.Internal
 
         public Stream GetStream(int len, bool canSeek)
         {
-            if (_columnStream == null)
-                _columnStream = new ColumnStream(Connector);
-
+            _columnStream ??= new ColumnStream(Connector);
             _columnStream.Init(len, canSeek);
             return _columnStream;
         }

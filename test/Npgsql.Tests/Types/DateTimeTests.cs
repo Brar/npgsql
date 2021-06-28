@@ -193,7 +193,8 @@ namespace Npgsql.Tests.Types
                 Assert.Ignore("Test cannot run when machine timezone is UTC");
 
             // Note that the date component of the below is ignored
-            var dto = new DateTimeOffset(5, 5, 5, 13, 3, 45, 510, tzOffset);
+            //var dto = new DateTimeOffset(5, 5, 5, 13, 3, 45, 510, tzOffset);
+            var dto = new DateTimeOffset(1, 1, 1, 19, 16, 48, tzOffset);
             var dtUtc = new DateTime(dto.Year, dto.Month, dto.Day, dto.Hour, dto.Minute, dto.Second, dto.Millisecond, DateTimeKind.Utc) - tzOffset;
             var dtLocal = new DateTime(dto.Year, dto.Month, dto.Day, dto.Hour, dto.Minute, dto.Second, dto.Millisecond, DateTimeKind.Local);
             var dtUnspecified = new DateTime(dto.Year, dto.Month, dto.Day, dto.Hour, dto.Minute, dto.Second, dto.Millisecond, DateTimeKind.Unspecified);

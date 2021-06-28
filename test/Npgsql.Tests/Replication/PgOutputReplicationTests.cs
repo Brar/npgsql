@@ -12,9 +12,9 @@ using Npgsql.Replication.PgOutput.Messages;
 
 namespace Npgsql.Tests.Replication
 {
-    [TestFixture(ProtocolVersionMode.ProtocolV1, ReplicationDataMode.DefaultReplicationDataMode, TransactionStreamingMode.DefaultTransactionMode)]
+    [TestFixture(ProtocolVersionMode.ProtocolV1, ReplicationDataMode.DefaultReplicationData, TransactionStreamingMode.DefaultTransaction)]
     //[TestFixture(ProtocolVersionMode.ProtocolV1, ReplicationDataMode.BinaryReplicationDataMode, TransactionStreamingMode.DefaultTransactionMode)]
-    [TestFixture(ProtocolVersionMode.ProtocolV2, ReplicationDataMode.DefaultReplicationDataMode, TransactionStreamingMode.StreamingTransactionMode)]
+    [TestFixture(ProtocolVersionMode.ProtocolV2, ReplicationDataMode.DefaultReplicationData, TransactionStreamingMode.StreamingTransaction)]
     // We currently don't execute all possible combinations of settings for efficiency reasons because they don't
     // interact in the current implementation.
     // Feel free to uncomment some or all of the following lines if the implementation changed or you suspect a

@@ -42,8 +42,6 @@ Npgsql.PhysicalOpenCallback
 Npgsql.Replication.PgOutput.Messages.InsertMessage.CloneAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Npgsql.Replication.PgOutput.Messages.InsertMessage!>!
 Npgsql.Replication.PgOutput.Messages.RelationMessage.Columns.get -> System.Collections.Immutable.ImmutableArray<Npgsql.Replication.PgOutput.Messages.RelationMessage.Column>
 Npgsql.Replication.PgOutput.Messages.ReplicationDataRecord
-Npgsql.Replication.PgOutput.Messages.ReplicationDataRecord.Clone() -> Npgsql.Replication.PgOutput.Messages.ReplicationDataRecord!
-Npgsql.Replication.PgOutput.Messages.ReplicationDataRecord.CloneAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<Npgsql.Replication.PgOutput.Messages.ReplicationDataRecord!>
 Npgsql.Replication.PgOutput.Messages.ReplicationDataRecord.FieldCount.get -> int
 Npgsql.Replication.PgOutput.Messages.ReplicationDataRecord.GetAsyncEnumerator(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerator<Npgsql.Replication.PgOutput.Messages.ReplicationTuple!>!
 Npgsql.Replication.PgOutput.Messages.ReplicationDataRecord.GetBoolean(int i) -> bool

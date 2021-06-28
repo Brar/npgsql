@@ -155,7 +155,7 @@ namespace Npgsql.Replication.PgOutput.Messages
             => _dataRecordEnumerator.SetCancellationToken(cancellationToken);
 
         // ToDo: DRY
-        public ReplicationDataRecord Clone()
+        internal ReplicationDataRecord Clone()
         {
             if (!_dataRecordEnumerator.TryReset())
                 throw new InvalidOperationException($"Cloning a {nameof(ReplicationDataRecord)} is not supported after starting to read its fields.");
@@ -179,16 +179,16 @@ namespace Npgsql.Replication.PgOutput.Messages
                     buffer.Write(BitConverter.GetBytes(BitConverter.IsLittleEndian ? BinaryPrimitives.ReverseEndianness(enumerator.Current.Length) : enumerator.Current.Length));
                     enumerator.Current.GetStream().CopyTo(buffer);
                 }
-
             }
 
             buffer.Position = 0;
             var readBuffer = new NpgsqlReadBuffer(_readBuffer.Connector, buffer, null, MinBufferLength(buffer.Length),
                 _readBuffer.Connector.TextEncoding, _readBuffer.Connector.RelaxedTextEncoding, usePool: true);
+
             return new ReplicationDataRecord(readBuffer).Init((ushort)FieldCount, _relationInfo);
         }
 
-        public ValueTask<ReplicationDataRecord> CloneAsync(CancellationToken cancellationToken = default)
+        internal ValueTask<ReplicationDataRecord> CloneAsync(CancellationToken cancellationToken = default)
         {
             using (NoSynchronizationContextScope.Enter())
                 return CloneAsyncInternal(cancellationToken);
@@ -217,12 +217,13 @@ namespace Npgsql.Replication.PgOutput.Messages
                         buffer.Write(BitConverter.GetBytes(BitConverter.IsLittleEndian ? BinaryPrimitives.ReverseEndianness(enumerator.Current.Length) : enumerator.Current.Length));
                         await enumerator.Current.GetStream().CopyToAsync(buffer, 8192, cancellationToken);
                     }
-
                 }
 
                 buffer.Position = 0;
+                // Hack: Abuse a NpgsqlReadBuffer as buffer. This currently costs at least 4096 bytes per row!
                 var readBuffer = new NpgsqlReadBuffer(_readBuffer.Connector, buffer, null, MinBufferLength(buffer.Length),
                     _readBuffer.Connector.TextEncoding, _readBuffer.Connector.RelaxedTextEncoding, usePool: true);
+
                 return new ReplicationDataRecord(readBuffer).Init((ushort)FieldCount, _relationInfo);
             }
         }
@@ -234,6 +235,9 @@ namespace Npgsql.Replication.PgOutput.Messages
 
         internal ReplicationDataRecord Init(ushort fieldCount, RelationInfo relationInfo)
         {
+            // Hack: Set AttemptPostgresCancellation back to true on the connector in case it has been left at false (e. g. by GetStream())
+            _readBuffer.Connector.StartNestedCancellableOperation().Dispose();
+
             FieldCount = fieldCount;
             _relationInfo = relationInfo;
             _dataRecordEnumerator.Init(fieldCount, relationInfo);
