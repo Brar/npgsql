@@ -1,0 +1,24 @@
+SHOW password_encryption \gset
+SELECT CASE WHEN :'password_encryption' = 'on' THEN 'on' ELSE 'md5' END as safe_md5 \gset
+SET password_encryption = :'safe_md5';
+CREATE USER npgsql_tests SUPERUSER PASSWORD 'md5adf74603a5772843f53e812f03dacb02';
+CREATE USER npgsql_tests_ssl SUPERUSER PASSWORD 'npgsql_tests_ssl';
+CREATE USER npgsql_tests_nossl SUPERUSER PASSWORD 'npgsql_tests_nossl';
+SELECT CASE WHEN :'password_encryption' = 'on' THEN 'on' ELSE 'scram-sha-256' END as safe_scram \gset
+SET password_encryption = :'safe_scram';
+CREATE USER npgsql_tests_scram SUPERUSER PASSWORD 'npgsql_tests_scram';
+ALTER SYSTEM SET password_encryption = :'safe_scram';
+ALTER SYSTEM SET ssl = 'on';
+SHOW data_directory \gset
+SELECT :'data_directory'  || '/server.crt' AS ssl_cert_file \gset
+SELECT :'data_directory'  || '/server.key' AS ssl_key_file \gset
+ALTER SYSTEM SET ssl_cert_file = :'ssl_cert_file';
+ALTER SYSTEM SET ssl_key_file = :'ssl_key_file';
+ALTER SYSTEM SET wal_level = 'logical';
+ALTER SYSTEM SET max_wal_senders = 50;
+ALTER SYSTEM SET logical_decoding_work_mem = '64kB';
+ALTER SYSTEM SET wal_sender_timeout = '3s';
+ALTER SYSTEM SET synchronous_standby_names = 'npgsql_test_sync_standby';
+ALTER SYSTEM SET synchronous_commit = 'local';
+\qecho :data_directory
+SHOW hba_file;

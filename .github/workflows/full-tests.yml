@@ -1,0 +1,189 @@
+name: FullTests
+
+on:
+  push:
+    branches:
+      - '*'
+    tags:
+      - '*'
+  workflow_dispatch:
+
+env:
+  dotnet_sdk_version: '6.0.x'
+  postgres_devel_version: 15
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  # Hack to support latest prerelease dotnet SDK, https://github.com/dotnet/installer/issues/12230#issuecomment-936348246
+  MSBuildEnableWorkloadResolver: false
+
+jobs:
+  Build-and-Test:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+        pg_version: [ 14, 13, 12, 11, 10, 9.6, 9.5, 9.4 ]
+        config: [ Debug, Release ]
+        exclude:
+          # Excludes PostgreSQL 9.6 on macOS because the brew formula has been disabled
+          - os: macos-latest
+            pg_version: 9.6
+        include:
+          # Includes PostgreSQL devel on Ubuntu
+          - os: ubuntu-latest
+            pg_version: 15
+            config: Debug
+          - os: ubuntu-latest
+            pg_version: 15
+            config: Release
+
+    outputs:
+      is_release: ${{ steps.analyze_tag.outputs.is_release }}
+      is_prerelease: ${{ steps.analyze_tag.outputs.is_prerelease }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2.4.0
+
+      - name: NuGet Cache
+        uses: actions/cache@v2.1.7
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Build.targets') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Setup .NET Core SDK
+        uses: actions/setup-dotnet@v1.9.0
+        with:
+          dotnet-version: ${{ env.dotnet_sdk_version }}
+
+      - name: Build
+        run: dotnet build -c ${{ matrix.config }}
+        shell: bash
+
+      - name: Prepare PostgreSQL
+        shell: pwsh
+        run: |
+          $BUILD_HELPER_DIR = "$Env:GITHUB_WORKSPACE/.build"
+          $PGVERSION = "${{ matrix.pg_version }}"
+          $parts = $PGVERSION -split '\.'
+          $PGMAJOR = [int]$parts[0]
+          $PGMINOR = [Nullable[int]]$parts[1]
+          $psqlScript = Get-Content -LiteralPath $BUILD_HELPER_DIR/ci-setup.psql -Raw
+          $pgHbaConf = Get-Content -LiteralPath $BUILD_HELPER_DIR/ci-hba.conf -Raw
+          
+          # Apply some version dependent fixes
+          if ($PGMAJOR -lt 10)
+          {
+            $pgHbaConf = ($pgHbaConf -replace 'scram-sha-256','md5')
+          }
+          if ($PGMAJOR -lt 13)
+          {
+            $psqlScript = ($psqlScript -replace 'ALTER SYSTEM SET logical_decoding_work_mem [^;]+;','')
+          }
+          
+          If ($IsLinux)
+          {
+            dpkg-query -W --showformat='${Package}\n' 'postgresql-*' | xargs sudo dpkg -P postgresql
+            wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+            sudo add-apt-repository "deb https://apt-archive.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg-archive main"
+            sudo add-apt-repository "deb https://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main"
+            
+            If ($PGVERSION -eq ${{ env.postgres_devel_version }})
+            {
+              # Add and pin the testing repo so that upgrading dependecies succeeds
+              sudo add-apt-repository "deb https://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg-testing main ${{ env.postgres_devel_version }}"
+              "Package: *`nPin: release a=$(lsb_release -cs)-pgdg-testing`nPin-Priority: 500" | sudo tee /etc/apt/preferences.d/pgdg-testing > $null
+            }
+            sudo apt-get update -qq
+            sudo apt-get install -qq postgresql-$PGVERSION
+            
+            # Apply some linux specifics
+            if ($PGMAJOR -gt 9)
+            {
+              $psqlScript += "SHOW unix_socket_directories \gset
+              ALTER SYSTEM SET unix_socket_directories = :'unix_socket_directories','@/npgsql_unix';"
+            }
+            
+            sudo pg_ctlcluster $PGVERSION main start
+            ($PGDATA, $HBAFILE) = ($psqlScript | sudo -u postgres psql -Atq)
+            sudo cp $BUILD_HELPER_DIR/server.crt $BUILD_HELPER_DIR/server.key $PGDATA
+            sudo chmod 600 $PGDATA/server.crt
+            sudo chmod 600 $PGDATA/server.key
+            sudo chown postgres $PGDATA/server.crt
+            sudo chown postgres $PGDATA/server.key
+            $pgHbaConf | sudo tee $HBAFILE > $null
+            sudo pg_ctlcluster $PGVERSION main restart
+          }
+          If ($IsMacOS)
+          {
+            brew update
+            brew uninstall --force postgresql
+            rm -rf /usr/local/var/postgresql
+            brew install postgresql@$PGVERSION
+            $Env:PATH += ":/usr/local/opt/postgresql@$PGVERSION/bin"
+            brew services start postgresql@$PGVERSION
+            $loopCount = 1
+            do
+            {
+              $loopCount++
+              pg_isready -q
+            } while ((-not $?) -and ($loopCount -le 5))
+            ($PGDATA, $HBAFILE) = ($psqlScript | psql -Atq -d postgres)
+            Copy-Item -Path $BUILD_HELPER_DIR/server.* -Include *.crt,*.key -Destination $PGDATA
+            chmod 600 $PGDATA/server.crt
+            chmod 600 $PGDATA/server.key
+            $pgHbaConf | Out-File $HBAFILE
+            brew services restart postgresql@$PGVERSION
+            $loopCount = 1
+            do
+            {
+              $loopCount++
+              pg_isready -q
+            } while ((-not $?) -and ($loopCount -le 5))
+          }
+          If ($IsWindows)
+          {
+            $downloadUrl = '${{ matrix.download_url }}'
+            if ($downloadUrl -eq '')
+            {
+              $EDB_VERSION = ([xml](Invoke-WebRequest -Uri https://sbp.enterprisedb.com/applications.xml).content).DocumentElement.SelectNodes("//application[id='postgresql_$($PGMAJOR)$($PGMINOR)' and platform='windows-x64']/version/text()").Value
+              $downloadUrl = "https://get.enterprisedb.com/postgresql/postgresql-$($EDB_VERSION)-windows-x64-binaries.zip"
+            }
+            curl -o pgsql.zip -L $downloadUrl
+            unzip pgsql.zip -x 'pgsql/include/**' 'pgsql/doc/**' 'pgsql/pgAdmin 4/**' 'pgsql/StackBuilder/**'
+            $Env:PATH += ";$(Get-Location)\pgsql\bin"
+            $Env:PGDATA = "pgsql/PGDATA"
+            initdb -D $Env:PGDATA -E UTF8 -U postgres
+            $psqlScript += "ALTER SYSTEM SET unix_socket_directories = '$($Env:TEMP -replace '\\','/')';"
+            pg_ctl -D $Env:PGDATA start
+            $loopCount = 1
+            do
+            {
+              $loopCount++
+              pg_isready -q
+            } while ((-not $?) -and ($loopCount -le 5))
+            ($PGDATA, $HBAFILE) = ($psqlScript | psql -Atq -d postgres)
+            Copy-Item -Path $BUILD_HELPER_DIR/server.* -Include *.crt,*.key -Destination $PGDATA
+            $pgHbaConf | Out-File $HBAFILE
+            pg_ctl -D $PGDATA restart
+            $loopCount = 1
+            do
+            {
+              $loopCount++
+              pg_isready -q
+            } while ((-not $?) -and ($loopCount -le 5))
+
+          }
+
+      - name: Test
+        run: dotnet test -c ${{ matrix.config }} test/Npgsql.Tests --logger "GitHubActions;report-warnings=false"
+        shell: bash
+
+      - name: Test Plugins
+        run: |
+            dotnet test -c ${{ matrix.config }} test/Npgsql.NodaTime.Tests --logger "GitHubActions;report-warnings=false"
+            dotnet test -c ${{ matrix.config }} test/Npgsql.PluginTests --filter ClassName=Npgsql.PluginTests.JsonNetTests --logger "GitHubActions;report-warnings=false"
+        shell: bash

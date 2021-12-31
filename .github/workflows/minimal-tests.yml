@@ -1,0 +1,109 @@
+name: MinimalTests
+
+on:
+  push:
+    branches:
+      - 'main'
+    tags:
+      - '*'
+  pull_request:
+
+env:
+  dotnet_sdk_version: '6.0.x'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  # Hack to support latest prerelease dotnet SDK, https://github.com/dotnet/installer/issues/12230#issuecomment-936348246
+  MSBuildEnableWorkloadResolver: false
+
+jobs:
+  Build-and-Test:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+        config: [ Debug, Release ]
+
+    outputs:
+      is_release: ${{ steps.analyze_tag.outputs.is_release }}
+      is_prerelease: ${{ steps.analyze_tag.outputs.is_prerelease }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2.4.0
+
+      - name: NuGet Cache
+        uses: actions/cache@v2.1.7
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Build.targets') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Setup .NET Core SDK
+        uses: actions/setup-dotnet@v1.9.0
+        with:
+          dotnet-version: ${{ env.dotnet_sdk_version }}
+
+      - name: Build
+        run: dotnet build -c ${{ matrix.config }}
+        shell: bash
+
+      - name: Prepare PostgreSQL
+        shell: pwsh
+        run: |
+          $BUILD_HELPER_DIR = "$Env:GITHUB_WORKSPACE/.build"
+          $psqlScript = Get-Content -LiteralPath $BUILD_HELPER_DIR/ci-setup.psql -Raw
+          $pgHbaConf = Get-Content -LiteralPath $BUILD_HELPER_DIR/ci-hba.conf -Raw
+          
+          If ($IsLinux)
+          {
+            $psqlScript += "SHOW unix_socket_directories \gset
+            ALTER SYSTEM SET unix_socket_directories = :'unix_socket_directories','@/npgsql_unix';"
+            
+            $PGMAJOR = (psql -V) -replace '^\D*(?<MajorVersion>\d+)\.\d+.*$','${MajorVersion}'
+            sudo pg_ctlcluster $PGMAJOR main start
+            ($PGDATA, $HBAFILE) = ($psqlScript | sudo -u postgres psql -Atq)
+            sudo cp $BUILD_HELPER_DIR/server.crt $BUILD_HELPER_DIR/server.key $PGDATA
+            sudo chmod 600 $PGDATA/server.crt
+            sudo chmod 600 $PGDATA/server.key
+            sudo chown postgres $PGDATA/server.crt
+            sudo chown postgres $PGDATA/server.key
+            $pgHbaConf | sudo tee $HBAFILE > $null
+            sudo pg_ctlcluster $PGMAJOR main restart
+          }
+          If ($IsMacOS)
+          {
+            $PGMAJOR = (psql -V) -replace '^\D*(?<MajorVersion>\d+)\.\d+.*$','${MajorVersion}'
+            brew services start postgresql
+            While (!(Test-Path /tmp/.s.PGSQL.5432 -ErrorAction SilentlyContinue)){}
+            ($PGDATA, $HBAFILE) = ($psqlScript | psql -Atq -d postgres)
+            Copy-Item -Path $BUILD_HELPER_DIR/server.* -Include *.crt,*.key -Destination $PGDATA
+            chmod 600 $PGDATA/server.crt
+            chmod 600 $PGDATA/server.key
+            $pgHbaConf | Out-File $HBAFILE
+            brew services restart postgresql
+            While (!(Test-Path /tmp/.s.PGSQL.5432 -ErrorAction SilentlyContinue)){}
+          }
+          If ($IsWindows)
+          {
+            $psqlScript += "ALTER SYSTEM SET unix_socket_directories = '$($Env:TEMP -replace '\\','/')';"
+            
+            $Env:PATH += ";$Env:PGBIN"
+            $PGMAJOR = (psql -V) -replace '^\D*(?<MajorVersion>\d+)\.\d+.*$','${MajorVersion}'
+            pg_ctl -D $Env:PGDATA start
+            ($PGDATA, $HBAFILE) = ($psqlScript | psql -Atq -d postgres)
+            Copy-Item -Path $BUILD_HELPER_DIR/server.* -Include *.crt,*.key -Destination $PGDATA
+            $pgHbaConf | Out-File $HBAFILE
+            pg_ctl -D $PGDATA restart
+          }
+
+      - name: Test
+        run: dotnet test -c ${{ matrix.config }} test/Npgsql.Tests --logger "GitHubActions;report-warnings=false"
+        shell: bash
+
+      - name: Test Plugins
+        run: |
+            dotnet test -c ${{ matrix.config }} test/Npgsql.NodaTime.Tests --logger "GitHubActions;report-warnings=false"
+            dotnet test -c ${{ matrix.config }} test/Npgsql.PluginTests --filter ClassName=Npgsql.PluginTests.JsonNetTests --logger "GitHubActions;report-warnings=false"
+        shell: bash
