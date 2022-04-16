@@ -28,5 +28,6 @@
     <ItemGroup>
         <EmbeddedResource Include="TypeHandler.snbtxt" />
         <EmbeddedResource Include="NpgsqlConnectionStringBuilder.snbtxt" />
+        <EmbeddedResource Include="GeneratedDatabaseInfo.snbtxt" />
     </ItemGroup>
 </Project>

@@ -13,6 +13,8 @@ using System.Threading.Tasks;
 using Npgsql.Internal;
 using Npgsql.PostgresTypes;
 using Npgsql.Util;
+using Npgsql.Tests.Support;
+using NpgsqlTypes;
 using NUnit.Framework;
 using static Npgsql.Tests.TestUtil;
 
@@ -1175,6 +1177,35 @@ LANGUAGE 'plpgsql'");
         Assert.That(await conn.ExecuteScalarAsync("SELECT 'foo'"), Is.EqualTo("foo"));
         Assert.That(await conn.ExecuteScalarAsync("SELECT TRUE"), Is.EqualTo(true));
         Assert.That(await conn.ExecuteScalarAsync("SELECT INET '192.168.1.1'"), Is.EqualTo(IPAddress.Parse("192.168.1.1")));
+    }
+
+    [Test, Description("Some applications don't play well with pg_type loading, we have a source generated DatabaseInfo supporting all hardcoded types for this")]
+    public async Task AllHardCodedTypes()
+    {
+        var builder = new NpgsqlConnectionStringBuilder(ConnectionString)
+        {
+            ApplicationName = nameof(AllHardCodedTypes),
+            ServerCompatibilityMode = ServerCompatibilityMode.AllHardCodedTypes
+        };
+
+        using var _ = CreateTempPool(builder, out var connectionString);
+        using var conn = await OpenConnectionAsync(connectionString);
+        // Test that some basic types do work
+        Assert.That(await conn.ExecuteScalarAsync("SELECT 8"), Is.EqualTo(8));
+        Assert.That(await conn.ExecuteScalarAsync("SELECT 'foo'"), Is.EqualTo("foo"));
+        Assert.That(await conn.ExecuteScalarAsync("SELECT TRUE"), Is.EqualTo(true));
+        Assert.That(await conn.ExecuteScalarAsync("SELECT INET '192.168.1.1'"), Is.EqualTo(IPAddress.Parse("192.168.1.1")));
+        //The following types with hardcoded oids should be supported in this mode:
+        // Arrays
+        Assert.That(await conn.ExecuteScalarAsync("SELECT '{1,2,3}'::INTEGER[]"), Is.EquivalentTo(new []{1,2,3}));
+        // Ranges
+        Assert.That(await conn.ExecuteScalarAsync("SELECT '[3,7)'::int4range"), Is.EqualTo(new NpgsqlRange<int>(3, true, false, 7, false, false)));
+        // Arrays of ranges
+        Assert.That(await conn.ExecuteScalarAsync("SELECT '{\"[3,7)\", \"[8,)\"}'::int4range[]"),
+            Is.EquivalentTo(new[] { new NpgsqlRange<int>(3, true, false, 7, false, false), new NpgsqlRange<int>(8, true, false, 0, false, true) }));
+        // Multiranges
+        Assert.That(await conn.ExecuteScalarAsync("SELECT '{[3,7), [8,)}'::int4multirange"),
+            Is.EquivalentTo(new[] { new NpgsqlRange<int>(3, true, false, 7, false, false), new NpgsqlRange<int>(8, true, false, 0, false, true) }));
     }
 
     [Test, IssueLink("https://github.com/npgsql/npgsql/issues/1158")]

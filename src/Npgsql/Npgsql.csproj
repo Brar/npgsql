@@ -21,6 +21,13 @@
     <ProjectReference Include="../Npgsql.SourceGenerators/Npgsql.SourceGenerators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--https://git.postgresql.org/gitweb/?p=postgresql.git;a=blob_plain;f=src/include/catalog/pg_type.dat;hb=refs/heads/REL_14_STABLE -->
+    <AdditionalFiles Include="pg_catalog/pg_type.dat" />
+    <!--https://git.postgresql.org/gitweb/?p=postgresql.git;a=blob_plain;f=src/include/catalog/pg_range.dat;hb=refs/heads/REL_14_STABLE -->
+    <AdditionalFiles Include="pg_catalog/pg_range.dat" />
+  </ItemGroup>
+
   <ItemGroup Condition=" '$(TargetFramework)' == 'net7.0' ">
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="All" />
   </ItemGroup>
