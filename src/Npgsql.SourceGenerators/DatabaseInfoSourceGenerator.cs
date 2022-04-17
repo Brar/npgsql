@@ -139,7 +139,9 @@ sealed class DatabaseInfoSourceGenerator : ISourceGenerator
             MultirangeTypes = multiRangeTypes,
             ArrayTypes = pgType
                 .Where(d => d.ContainsKey("array_type_oid")
-                            && d["typtype"] != "c" /* Exclude arrays of composite types. See comment above. */)
+                            && d["typtype"] != "c" /* Exclude arrays of composite types. See comment above. */
+                            && (pgRange != null || d["typtype"] != "r" && d["typtype"] != "m")
+                    )
                 .Select(t => new
                 {
                     Name = "_" + t["typname"],
