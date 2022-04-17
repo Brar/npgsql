@@ -115,12 +115,22 @@ sealed class DatabaseInfoSourceGenerator : ISourceGenerator
         var obj = new ScriptObject();
         obj.Import(new
         {
-            BaseTypes = pgType.Where(d => !d.ContainsKey("typtype")).Select(t => new
+            UnreferencedBaseTypes = pgType.Where(d => !d.ContainsKey("typtype") && !d.ContainsKey("array_type_oid") && (pgRange == null || pgRange.All(r => r["rngsubtype"] != d["typname"]))).Select(t => new
             {
                 Name = t["typname"],
                 Oid = t["oid"]
             }).ToArray(),
-            PseudoTypes = pgType.Where(d => d["typtype"] == "p").Select(t => new
+            ReferencedBaseTypes = pgType.Where(d => !d.ContainsKey("typtype") && (d.ContainsKey("array_type_oid") || (pgRange?.Any(r => r["rngsubtype"] == d["typname"]) ?? false))).Select(t => new
+            {
+                Name = t["typname"],
+                Oid = t["oid"]
+            }).ToArray(),
+            UnreferencedPseudoTypes = pgType.Where(d => d["typtype"] == "p" && !d.ContainsKey("array_type_oid") && (pgRange == null || pgRange.All(r => r["rngsubtype"] != d["typname"]))).Select(t => new
+            {
+                Name = t["typname"],
+                Oid = t["oid"]
+            }).ToArray(),
+            ReferencedPseudoTypes = pgType.Where(d => d["typtype"] == "p" && (d.ContainsKey("array_type_oid") || (pgRange?.Any(r => r["rngsubtype"] == d["typname"]) ?? false))).Select(t => new
             {
                 Name = t["typname"],
                 Oid = t["oid"]
