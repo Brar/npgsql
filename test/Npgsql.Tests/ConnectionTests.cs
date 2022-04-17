@@ -1204,7 +1204,7 @@ LANGUAGE 'plpgsql'");
         Assert.That(await conn.ExecuteScalarAsync("SELECT '{\"[3,7)\", \"[8,)\"}'::int4range[]"),
             Is.EquivalentTo(new[] { new NpgsqlRange<int>(3, true, false, 7, false, false), new NpgsqlRange<int>(8, true, false, 0, false, true) }));
         // Multiranges
-        if (conn.PostgreSqlVersion < new Version(14, 0))
+        if (conn.PostgreSqlVersion >= new Version(14, 0))
             Assert.That(await conn.ExecuteScalarAsync("SELECT '{[3,7), [8,)}'::int4multirange"),
                 Is.EquivalentTo(new[]
                     { new NpgsqlRange<int>(3, true, false, 7, false, false), new NpgsqlRange<int>(8, true, false, 0, false, true) }));
