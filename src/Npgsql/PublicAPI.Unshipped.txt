@@ -1,6 +1,5 @@
 ﻿#nullable enable
 Npgsql.NpgsqlLoggingConfiguration
-Npgsql.ServerCompatibilityMode.AllHardCodedTypes = 3 -> Npgsql.ServerCompatibilityMode
 static Npgsql.NpgsqlLoggingConfiguration.InitializeLogging(Microsoft.Extensions.Logging.ILoggerFactory! loggerFactory, bool parameterLoggingEnabled = false) -> void
 *REMOVED*abstract Npgsql.Logging.NpgsqlLogger.IsEnabled(Npgsql.Logging.NpgsqlLogLevel level) -> bool
 *REMOVED*abstract Npgsql.Logging.NpgsqlLogger.Log(Npgsql.Logging.NpgsqlLogLevel level, int connectorId, string! msg, System.Exception? exception = null) -> void

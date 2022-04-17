@@ -23,7 +23,6 @@ public abstract class NpgsqlDatabaseInfo
     static volatile INpgsqlDatabaseInfoFactory[] Factories = new INpgsqlDatabaseInfoFactory[]
     {
         new PostgresMinimalDatabaseInfoFactory(),
-        new GeneratedDatabaseInfoFactory(),
         new PostgresDatabaseInfoFactory()
     };
 
@@ -329,7 +328,6 @@ public abstract class NpgsqlDatabaseInfo
         Factories = new INpgsqlDatabaseInfoFactory[]
         {
             new PostgresMinimalDatabaseInfoFactory(),
-            new GeneratedDatabaseInfoFactory(),
             new PostgresDatabaseInfoFactory()
         };
         Cache.Clear();

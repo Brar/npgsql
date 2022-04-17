@@ -6,13 +6,13 @@ using Npgsql.Internal;
 using Npgsql.PostgresTypes;
 using Npgsql.Util;
 
-#nullable enable
-
 namespace Npgsql;
 
-partial class GeneratedDatabaseInfo
+partial class PostgresMinimalDatabaseInfo
 {
-    static readonly Lazy<PostgresType[]> Types = new(() =>
+    static readonly PostgresType[] Types;
+
+    static PostgresMinimalDatabaseInfo()
     {
         ///////////////////////////
         // Referenced base types //
@@ -38,7 +38,7 @@ partial class GeneratedDatabaseInfo
         {{ for multirange_type in multirange_types }}var t_{{ multirange_type.name }} = new PostgresMultirangeType("pg_catalog", "{{ multirange_type.name }}", {{ multirange_type.oid }}u, t_{{ multirange_type.element_name }});
         {{ end }}
 
-        return new PostgresType[]
+        Types = new PostgresType[]
         {
             // Base types
             {{ for base_type in referenced_base_types }}t_{{ base_type.name }},{{ end }}
@@ -60,5 +60,5 @@ partial class GeneratedDatabaseInfo
             {{ for array_type in array_types }}new PostgresArrayType("pg_catalog", "{{ array_type.name }}", {{ array_type.oid }}u, t_{{ array_type.element_name }}),
             {{ end }}
         };
-    }, LazyThreadSafetyMode.ExecutionAndPublication);
+    }
 }

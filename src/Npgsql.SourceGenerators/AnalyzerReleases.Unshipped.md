@@ -1,5 +1,5 @@
 ### New Rules
 Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
-NPGSQLDBINFOGEN001 | DatabaseInfoSourceGenerator | Error | DatabaseInfoSourceGenerator
+PG0001 | Internal | Error | DatabaseInfoSourceGenerator
 PGXXXX  | Internal | Error    |

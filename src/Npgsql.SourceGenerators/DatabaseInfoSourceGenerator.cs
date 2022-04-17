@@ -19,10 +19,10 @@ sealed class DatabaseInfoSourceGenerator : ISourceGenerator
     // See: https://github.com/dotnet/roslyn-analyzers/issues/5890#issuecomment-1046043775
     // ReSharper disable once ArrangeObjectCreationWhenTypeEvident
     static readonly DiagnosticDescriptor DatFileParserError = new DiagnosticDescriptor(
-        id: "NPGSQLDBINFOGEN001",
+        id: "PG0001",
         title: "Failed to parse .dat file",
         messageFormat: "Syntax error in .dat file",
-        category: "DatabaseInfoSourceGenerator",
+        category: "Internal",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
 
@@ -31,8 +31,8 @@ sealed class DatabaseInfoSourceGenerator : ISourceGenerator
     public void Execute(GeneratorExecutionContext context)
     {
 
-        List<DatFileObject>? pgType = null;
-        List<DatFileObject>? pgRange = null;
+        List<Dictionary<string,string>>? pgType = null;
+        List<Dictionary<string,string>>? pgRange = null;
         var noDatFile = true;
         foreach (var file in context.AdditionalFiles)
         {
@@ -51,10 +51,6 @@ sealed class DatabaseInfoSourceGenerator : ISourceGenerator
                 case "pg_range.dat":
                     pgRange = ParseDatFile(file.GetText());
                     break;
-                default:
-                    throw new InvalidOperationException($"This source generator is not designed to make use of the information in '{fileName}'. " +
-                                                        "You may want to open an issue at https://github.com/npgsql/npgsql/issues/new and describe " +
-                                                        "what you are trying to do.");
                 }
             }
             catch (DatFileFormatException e)
@@ -74,14 +70,14 @@ sealed class DatabaseInfoSourceGenerator : ISourceGenerator
             return;
 
         if (pgType == null)
-            throw new ("This source generator needs at least a valid pg_type.dat file in AdditionalFiles to perform it's work");
+            throw new("This source generator needs at least a valid pg_type.dat file in AdditionalFiles to perform it's work");
 
         var compilation = context.Compilation;
-        var generatedDatabaseInfoSymbol = compilation.GetTypeByMetadataName("Npgsql.GeneratedDatabaseInfo");
-        if (generatedDatabaseInfoSymbol is null)
-            throw new ("Could not find GeneratedDatabaseInfo");
+        var postgresMinimalDatabaseInfoSymbol = compilation.GetTypeByMetadataName("Npgsql.PostgresMinimalDatabaseInfo");
+        if (postgresMinimalDatabaseInfoSymbol is null)
+            throw new("Could not find PostgresMinimalDatabaseInfo");
 
-        var template = Template.Parse(EmbeddedResource.GetContent("GeneratedDatabaseInfo.snbtxt"), "GeneratedDatabaseInfo.snbtxt");
+        var template = Template.Parse(EmbeddedResource.GetContent("PostgresMinimalDatabaseInfo.snbtxt"), "PostgresMinimalDatabaseInfo.snbtxt");
 
         var rangeTypes = new List<object>();
         var multiRangeTypes = new List<object>();
@@ -115,22 +111,34 @@ sealed class DatabaseInfoSourceGenerator : ISourceGenerator
         var obj = new ScriptObject();
         obj.Import(new
         {
-            UnreferencedBaseTypes = pgType.Where(d => !d.ContainsKey("typtype") && !d.ContainsKey("array_type_oid") && (pgRange == null || pgRange.All(r => r["rngsubtype"] != d["typname"]))).Select(t => new
+            UnreferencedBaseTypes = pgType.Where(d =>
+                !d.ContainsKey("typtype") && !d.ContainsKey("array_type_oid") &&
+                (pgRange == null || pgRange.All(r => r["rngsubtype"] != d["typname"]))).Select(t => new
             {
                 Name = t["typname"],
                 Oid = t["oid"]
             }).ToArray(),
-            ReferencedBaseTypes = pgType.Where(d => !d.ContainsKey("typtype") && (d.ContainsKey("array_type_oid") || (pgRange?.Any(r => r["rngsubtype"] == d["typname"]) ?? false))).Select(t => new
+            ReferencedBaseTypes = pgType.Where(d =>
+                !d.ContainsKey("typtype") &&
+                (d.ContainsKey("array_type_oid") || (pgRange?.Any(r => r["rngsubtype"] == d["typname"]) ?? false))).Select(t => new
             {
                 Name = t["typname"],
                 Oid = t["oid"]
             }).ToArray(),
-            UnreferencedPseudoTypes = pgType.Where(d => d["typtype"] == "p" && !d.ContainsKey("array_type_oid") && (pgRange == null || pgRange.All(r => r["rngsubtype"] != d["typname"]))).Select(t => new
+            UnreferencedPseudoTypes = pgType.Where(d =>
+                d.TryGetValue("typtype", out var value) && value == "p" && !d["typname"].StartsWith("_") &&
+                !d.ContainsKey("array_type_oid") && (pgRange == null || pgRange.All(r => r["rngsubtype"] != d["typname"]))
+                && pgType.All(p => p.TryGetValue("typtype", out var v) && v == "p" && p["typname"] != "_" + d["typname"])
+                ).Select(t => new
             {
                 Name = t["typname"],
                 Oid = t["oid"]
             }).ToArray(),
-            ReferencedPseudoTypes = pgType.Where(d => d["typtype"] == "p" && (d.ContainsKey("array_type_oid") || (pgRange?.Any(r => r["rngsubtype"] == d["typname"]) ?? false))).Select(t => new
+            ReferencedPseudoTypes = pgType.Where(d =>
+                d.TryGetValue("typtype", out var value) && value == "p" && !d["typname"].StartsWith("_") &&
+                (d.ContainsKey("array_type_oid") || (pgRange?.Any(r => r["rngsubtype"] == d["typname"]) ?? false)
+                                                 || pgType.Any(p => p.TryGetValue("typtype", out var v) && v == "p" && p["typname"] == "_" + d["typname"])
+                    )).Select(t => new
             {
                 Name = t["typname"],
                 Oid = t["oid"]
@@ -138,29 +146,38 @@ sealed class DatabaseInfoSourceGenerator : ISourceGenerator
             RangeTypes = rangeTypes,
             MultirangeTypes = multiRangeTypes,
             ArrayTypes = pgType
-                .Where(d => d.ContainsKey("array_type_oid")
-                            && d["typtype"] != "c" /* Exclude arrays of composite types. See comment above. */
-                            && (pgRange != null || d["typtype"] != "r" && d["typtype"] != "m")
-                    )
-                .Select(t => new
-                {
-                    Name = "_" + t["typname"],
-                    Oid = t["array_type_oid"],
-                    ElementName = t["typname"],
-                }).ToArray(),
+                .Where(d => (d.ContainsKey("array_type_oid") || d["typname"].StartsWith("_"))
+                            && (!d.TryGetValue("typtype", out var value) ||
+                                value != "c") // Exclude arrays of composite types. See comment above
+                            && (pgRange != null ||
+                                value != "r" && value != "m") // Exclude arrays of range types if pg_range.dat was not included
+                )
+                .Select(t => t["typname"].StartsWith("_")
+                    ? new
+                    {
+                        Name = t["typname"],
+                        Oid = t["oid"],
+                        ElementName = t["typname"].Substring(1),
+                    }
+                    : new
+                    {
+                        Name = "_" + t["typname"],
+                        Oid = t["array_type_oid"],
+                        ElementName = t["typname"],
+                    }).ToArray(),
         });
         var tc = new TemplateContext(obj);
         tc.AutoIndent = false;
         var output = template.Render(tc);
-        context.AddSource(generatedDatabaseInfoSymbol.Name + ".Generated.cs", SourceText.From(output, Encoding.UTF8));
+        context.AddSource(postgresMinimalDatabaseInfoSymbol.Name + ".Generated.cs", SourceText.From(output, Encoding.UTF8));
     }
 
-    static List<DatFileObject>? ParseDatFile(SourceText? content)
+    static List<Dictionary<string,string>>? ParseDatFile(SourceText? content)
     {
         if (content == null)
             return null;
 
-        var list = new List<DatFileObject>();
+        var list = new List<Dictionary<string,string>>();
         var dict = new Dictionary<string, string>();
         var key = new StringBuilder();
         var value = new StringBuilder();
@@ -611,33 +628,6 @@ sealed class DatabaseInfoSourceGenerator : ISourceGenerator
             Position = position;
             LineNumber = lineNumber;
             LinePosition = linePosition;
-        }
-    }
-
-    sealed class DatFileObject
-    {
-        readonly IDictionary<string, string> _data;
-
-        public DatFileObject(IDictionary<string, string> data)
-            => _data = data;
-
-        public string? this[string key]
-            => _data.TryGetValue(key, out var value) ? value : default;
-
-        public bool ContainsKey(string key)
-            => _data.ContainsKey(key);
-
-        public bool TryGetValue(string key, out string? value)
-            => _data.TryGetValue(key, out value);
-
-        public override string ToString()
-        {
-            var sb = new StringBuilder("{ ");
-            foreach (var pair in _data)
-                sb.Append(pair.Key).Append(" => '").Append(pair.Value.Replace("'", "\\'")).Append("', ");
-            sb.Length -= 2;
-            sb.Append(" }");
-            return sb.ToString();
         }
     }
 }
