@@ -200,7 +200,7 @@ public class CommandTests : MultiplexingTestBase
     [Test]
     public async Task Timeout_from_connection_string()
     {
-        Assert.That(NpgsqlConnector.MinimumInternalCommandTimeout, Is.Not.EqualTo(NpgsqlCommand.DefaultTimeout));
+        Assert.That(NpgsqlConnector.MinimumInternalCommandTimeout, Is.Not.EqualTo(NpgsqlConnectionDefaults.CommandTimeout));
         var timeout = NpgsqlConnector.MinimumInternalCommandTimeout;
         var connString = new NpgsqlConnectionStringBuilder(ConnectionString)
         {

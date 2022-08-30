@@ -53,7 +53,7 @@ public sealed partial class NpgsqlConnector : IDisposable
     /// <summary>
     /// The parsed connection string.
     /// </summary>
-    public NpgsqlConnectionStringBuilder Settings { get; }
+    public NpgsqlSingleHostConnectionSettings Settings { get; }
 
     ProvideClientCertificatesCallback? ProvideClientCertificatesCallback { get; }
     RemoteCertificateValidationCallback? UserCertificateValidationCallback { get; }
@@ -346,7 +346,7 @@ public sealed partial class NpgsqlConnector : IDisposable
 
         State = ConnectorState.Closed;
         TransactionStatus = TransactionStatus.Idle;
-        Settings = dataSource.Settings;
+        Settings = (NpgsqlSingleHostConnectionSettings)dataSource.Settings;
         PostgresParameters = new Dictionary<string, string>();
 
         CancelLock = new object();
@@ -383,9 +383,9 @@ public sealed partial class NpgsqlConnector : IDisposable
 
     #region Configuration settings
 
-    internal string Host => Settings.Host!;
+    internal string Host => Settings.SafeLogHost;
     internal int Port => Settings.Port;
-    internal string Database => Settings.Database!;
+    internal string Database => Settings.Database;
     string KerberosServiceName => Settings.KerberosServiceName;
     int ConnectionTimeout => Settings.Timeout;
     bool IntegratedSecurity => Settings.IntegratedSecurity;
@@ -690,13 +690,11 @@ public sealed partial class NpgsqlConnector : IDisposable
         if (Settings.SearchPath?.Length > 0)
             startupParams["search_path"] = Settings.SearchPath;
 
-        var timezone = Settings.Timezone ?? PostgresEnvironment.TimeZone;
-        if (timezone != null)
-            startupParams["TimeZone"] = timezone;
+        if (Settings.Timezone?.Length > 0)
+            startupParams["TimeZone"] = Settings.Timezone;
 
-        var options = Settings.Options ?? PostgresEnvironment.Options;
-        if (options?.Length > 0)
-            startupParams["options"] = options;
+        if (Settings.Options?.Length > 0)
+            startupParams["options"] = Settings.Options;
 
         switch (Settings.ReplicationMode)
         {
@@ -2611,7 +2609,7 @@ public sealed partial class NpgsqlConnector : IDisposable
                 : _isTransactionReadOnly.Value
                     ? ClusterState.PrimaryReadOnly
                     : ClusterState.PrimaryReadWrite;
-            return ClusterStateCache.UpdateClusterState(Settings.Host!, Settings.Port, state, DateTime.UtcNow,
+            return ClusterStateCache.UpdateClusterState(Settings.SafeLogHost, Settings.Port, state, DateTime.UtcNow,
                 ignoreDatabaseVersion || DatabaseInfo.Version.Major >= 14 ? TimeSpan.Zero : Settings.HostRecheckSecondsTranslated);
         }
 

@@ -80,7 +80,6 @@ public sealed partial class NpgsqlWriteBuffer : IDisposable
     /// The minimum buffer size possible.
     /// </summary>
     internal const int MinimumSize = 4096;
-    internal const int DefaultSize = 8192;
 
     #endregion
 

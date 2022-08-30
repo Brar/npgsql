@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace Npgsql;
@@ -14,19 +14,46 @@ namespace Npgsql;
 static class PoolManager
 {
     internal static ConcurrentDictionary<string, NpgsqlDataSource> Pools { get; } = new();
+    static Dictionary<NpgsqlDataSource, Timer> ClearedPools { get; } = new();
 
     internal static void Clear(string connString)
     {
-        // TODO: Actually remove the pools from here, #3387 (but be careful of concurrency)
-        if (Pools.TryGetValue(connString, out var pool))
-            pool.Clear();
+        NpgsqlDataSource? pool;
+        while (!Pools.TryRemove(connString, out pool) && Pools.ContainsKey(connString)) { }
+
+        if (pool == null)
+            return;
+        
+        pool.Clear();
+        var timer = new Timer(state =>
+        {
+            lock (ClearedPools)
+            {
+                var ds = (NpgsqlDataSource)state!;
+#if NET5_0_OR_GREATER
+                ClearedPools.Remove(ds, out var timer);
+#else
+                var timer = ClearedPools[ds];
+                ClearedPools.Remove(ds);
+#endif
+                ds.Dispose();
+                timer!.Dispose();
+            }
+        }, pool, TimeSpan.FromMinutes(1) /* ToDo: Put in some serious value here, probably reading it from the connection string */, Timeout.InfiniteTimeSpan);
+        ClearedPools.Add(pool, timer);
     }
 
     internal static void ClearAll()
     {
-        // TODO: Actually remove the pools from here, #3387 (but be careful of concurrency)
-        foreach (var pool in Pools.Values)
-            pool.Clear();
+        // Clear the cleared pools again since they may have been used (and by that refilled) after removing them from the pool
+        lock (ClearedPools)
+        {
+            foreach (var clearedPool in ClearedPools.Keys)
+                clearedPool.Clear();
+        }
+
+        foreach (var poolKey in Pools.Keys)
+            Clear(poolKey);
     }
 
     static PoolManager()
@@ -35,16 +62,5 @@ static class PoolManager
         // close idle connectors to prevent errors in PostgreSQL logs (#491).
         AppDomain.CurrentDomain.DomainUnload += (_, _) => ClearAll();
         AppDomain.CurrentDomain.ProcessExit += (_, _) => ClearAll();
-    }
-
-    /// <summary>
-    /// Resets the pool manager to its initial state, for test purposes only.
-    /// Assumes that no other threads are accessing the pool.
-    /// </summary>
-    internal static void Reset()
-    {
-        // TODO: Remove once #3387 is implemented
-        ClearAll();
-        Pools.Clear();
     }
 }

@@ -1,5 +1,84 @@
 ﻿#nullable enable
+abstract Npgsql.NpgsqlConnectionSettings.CreateConnectionString(Npgsql.NpgsqlConnectionSettings.PasswordHandling passwordHandling = Npgsql.NpgsqlConnectionSettings.PasswordHandling.Auto, Npgsql.NpgsqlConnectionSettings.DefaultHandling defaultHandling = Npgsql.NpgsqlConnectionSettings.DefaultHandling.OmitHardcodedDefaults) -> string!
+Npgsql.NpgsqlConnectionSettings
+Npgsql.NpgsqlConnectionSettings.ApplicationName.get -> string?
+Npgsql.NpgsqlConnectionSettings.ArrayNullabilityMode.get -> Npgsql.ArrayNullabilityMode
+Npgsql.NpgsqlConnectionSettings.AutoPrepareMinUsages.get -> int
+Npgsql.NpgsqlConnectionSettings.CancellationTimeout.get -> int
+Npgsql.NpgsqlConnectionSettings.CheckCertificateRevocation.get -> bool
+Npgsql.NpgsqlConnectionSettings.ClientEncoding.get -> string!
+Npgsql.NpgsqlConnectionSettings.CommandTimeout.get -> int
+Npgsql.NpgsqlConnectionSettings.ConnectionIdleLifetime.get -> int
+Npgsql.NpgsqlConnectionSettings.ConnectionLifetime.get -> int
+Npgsql.NpgsqlConnectionSettings.ConnectionPruningInterval.get -> int
+Npgsql.NpgsqlConnectionSettings.Database.get -> string!
+Npgsql.NpgsqlConnectionSettings.DefaultHandling
+Npgsql.NpgsqlConnectionSettings.DefaultHandling.IncludeEverything = 3 -> Npgsql.NpgsqlConnectionSettings.DefaultHandling
+Npgsql.NpgsqlConnectionSettings.DefaultHandling.OmitAllDefaults = 2 -> Npgsql.NpgsqlConnectionSettings.DefaultHandling
+Npgsql.NpgsqlConnectionSettings.DefaultHandling.OmitHardcodedDefaults = 0 -> Npgsql.NpgsqlConnectionSettings.DefaultHandling
+Npgsql.NpgsqlConnectionSettings.DefaultHandling.OmitOsDefaults = 1 -> Npgsql.NpgsqlConnectionSettings.DefaultHandling
+Npgsql.NpgsqlConnectionSettings.Encoding.get -> string!
+Npgsql.NpgsqlConnectionSettings.Enlist.get -> bool
+Npgsql.NpgsqlConnectionSettings.EntityAdminDatabase.get -> string?
+Npgsql.NpgsqlConnectionSettings.EntityTemplateDatabase.get -> string?
+Npgsql.NpgsqlConnectionSettings.IncludeErrorDetail.get -> bool
+Npgsql.NpgsqlConnectionSettings.IncludeRealm.get -> bool
+Npgsql.NpgsqlConnectionSettings.IntegratedSecurity.get -> bool
+Npgsql.NpgsqlConnectionSettings.InternalCommandTimeout.get -> int
+Npgsql.NpgsqlConnectionSettings.KeepAlive.get -> int
+Npgsql.NpgsqlConnectionSettings.KerberosServiceName.get -> string!
+Npgsql.NpgsqlConnectionSettings.LoadBalanceHosts.get -> bool
+Npgsql.NpgsqlConnectionSettings.LoadTableComposites.get -> bool
+Npgsql.NpgsqlConnectionSettings.LogParameters.get -> bool
+Npgsql.NpgsqlConnectionSettings.MaxAutoPrepare.get -> int
+Npgsql.NpgsqlConnectionSettings.MaxPoolSize.get -> int
+Npgsql.NpgsqlConnectionSettings.MinPoolSize.get -> int
+Npgsql.NpgsqlConnectionSettings.Multiplexing.get -> bool
+Npgsql.NpgsqlConnectionSettings.NoResetOnClose.get -> bool
+Npgsql.NpgsqlConnectionSettings.Options.get -> string?
+Npgsql.NpgsqlConnectionSettings.Passfile.get -> string?
+Npgsql.NpgsqlConnectionSettings.Password.get -> string?
+Npgsql.NpgsqlConnectionSettings.PasswordHandling
+Npgsql.NpgsqlConnectionSettings.PasswordHandling.Auto = 0 -> Npgsql.NpgsqlConnectionSettings.PasswordHandling
+Npgsql.NpgsqlConnectionSettings.PasswordHandling.Exclude = 2 -> Npgsql.NpgsqlConnectionSettings.PasswordHandling
+Npgsql.NpgsqlConnectionSettings.PasswordHandling.Include = 1 -> Npgsql.NpgsqlConnectionSettings.PasswordHandling
+Npgsql.NpgsqlConnectionSettings.PersistSecurityInfo.get -> bool
+Npgsql.NpgsqlConnectionSettings.Pooling.get -> bool
+Npgsql.NpgsqlConnectionSettings.ReadBufferSize.get -> int
+Npgsql.NpgsqlConnectionSettings.RootCertificate.get -> string?
+Npgsql.NpgsqlConnectionSettings.SearchPath.get -> string?
+Npgsql.NpgsqlConnectionSettings.ServerCompatibilityMode.get -> Npgsql.ServerCompatibilityMode
+Npgsql.NpgsqlConnectionSettings.SocketReceiveBufferSize.get -> int
+Npgsql.NpgsqlConnectionSettings.SocketSendBufferSize.get -> int
+Npgsql.NpgsqlConnectionSettings.SslCertificate.get -> string?
+Npgsql.NpgsqlConnectionSettings.SslKey.get -> string?
+Npgsql.NpgsqlConnectionSettings.SslMode.get -> Npgsql.SslMode
+Npgsql.NpgsqlConnectionSettings.SslPassword.get -> string?
+Npgsql.NpgsqlConnectionSettings.TargetSessionAttributes.get -> Npgsql.TargetSessionAttributes
+Npgsql.NpgsqlConnectionSettings.TcpKeepAlive.get -> bool
+Npgsql.NpgsqlConnectionSettings.TcpKeepAliveInterval.get -> int
+Npgsql.NpgsqlConnectionSettings.TcpKeepAliveTime.get -> int
+Npgsql.NpgsqlConnectionSettings.Timeout.get -> int
+Npgsql.NpgsqlConnectionSettings.Timezone.get -> string?
+Npgsql.NpgsqlConnectionSettings.TrustServerCertificate.get -> bool
+Npgsql.NpgsqlConnectionSettings.Username.get -> string?
+Npgsql.NpgsqlConnectionSettings.WriteBufferSize.get -> int
+Npgsql.NpgsqlConnectionSettings.WriteCoalescingBufferThresholdBytes.get -> int
+Npgsql.NpgsqlConnectionStringBuilder.ClientEncoding.get -> string!
+*REMOVED*Npgsql.NpgsqlConnectionStringBuilder.ClientEncoding.get -> string?
 Npgsql.NpgsqlLoggingConfiguration
+Npgsql.NpgsqlMultiHostConnectionSettings
+Npgsql.NpgsqlMultiHostConnectionSettings.HostAddresses.get -> System.Collections.Immutable.ImmutableArray<System.Net.IPAddress?>
+Npgsql.NpgsqlMultiHostConnectionSettings.Hosts.get -> System.Collections.Immutable.ImmutableArray<string?>
+Npgsql.NpgsqlMultiHostConnectionSettings.Ports.get -> System.Collections.Immutable.ImmutableArray<int>
+Npgsql.NpgsqlSingleHostConnectionSettings
+Npgsql.NpgsqlSingleHostConnectionSettings.Host.get -> string?
+Npgsql.NpgsqlSingleHostConnectionSettings.HostAddress.get -> System.Net.IPAddress?
+Npgsql.NpgsqlSingleHostConnectionSettings.Port.get -> int
+override Npgsql.NpgsqlMultiHostConnectionSettings.CreateConnectionString(Npgsql.NpgsqlConnectionSettings.PasswordHandling passwordHandling = Npgsql.NpgsqlConnectionSettings.PasswordHandling.Auto, Npgsql.NpgsqlConnectionSettings.DefaultHandling defaultHandling = Npgsql.NpgsqlConnectionSettings.DefaultHandling.OmitHardcodedDefaults) -> string!
+override Npgsql.NpgsqlMultiHostConnectionSettings.ToString() -> string!
+override Npgsql.NpgsqlSingleHostConnectionSettings.CreateConnectionString(Npgsql.NpgsqlConnectionSettings.PasswordHandling passwordHandling = Npgsql.NpgsqlConnectionSettings.PasswordHandling.Auto, Npgsql.NpgsqlConnectionSettings.DefaultHandling defaultHandling = Npgsql.NpgsqlConnectionSettings.DefaultHandling.OmitHardcodedDefaults) -> string!
+override Npgsql.NpgsqlSingleHostConnectionSettings.ToString() -> string!
 static Npgsql.NpgsqlLoggingConfiguration.InitializeLogging(Microsoft.Extensions.Logging.ILoggerFactory! loggerFactory, bool parameterLoggingEnabled = false) -> void
 *REMOVED*Npgsql.NpgsqlConnection.Settings.get -> Npgsql.NpgsqlConnectionStringBuilder!
 *REMOVED*abstract Npgsql.Logging.NpgsqlLogger.IsEnabled(Npgsql.Logging.NpgsqlLogLevel level) -> bool
@@ -256,7 +335,7 @@ Npgsql.NpgsqlDataSourceBuilder.ConnectionStringBuilder.get -> Npgsql.NpgsqlConne
 Npgsql.NpgsqlDataSourceBuilder.EnableParameterLogging(bool parameterLoggingEnabled = true) -> Npgsql.NpgsqlDataSourceBuilder!
 Npgsql.NpgsqlDataSourceBuilder.Build() -> Npgsql.NpgsqlDataSource!
 Npgsql.NpgsqlDataSourceBuilder.NpgsqlDataSourceBuilder(string? connectionString = null) -> void
-Npgsql.NpgsqlDataSourceBuilder.UsePeriodicPasswordProvider(System.Func<Npgsql.NpgsqlConnectionStringBuilder!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string!>>? passwordProvider, System.TimeSpan successRefreshInterval, System.TimeSpan failureRefreshInterval) -> Npgsql.NpgsqlDataSourceBuilder!
+Npgsql.NpgsqlDataSourceBuilder.UsePeriodicPasswordProvider(System.Func<Npgsql.NpgsqlConnectionSettings!, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<string!>>? passwordProvider, System.TimeSpan successRefreshInterval, System.TimeSpan failureRefreshInterval) -> Npgsql.NpgsqlDataSourceBuilder!
 Npgsql.NpgsqlDataSourceBuilder.UseLoggerFactory(Microsoft.Extensions.Logging.ILoggerFactory? loggerFactory) -> Npgsql.NpgsqlDataSourceBuilder!
 Npgsql.Replication.PhysicalReplicationConnection.ReadReplicationSlot(string! slotName, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Npgsql.Replication.PhysicalReplicationSlot?>!
 Npgsql.Replication.PhysicalReplicationConnection.StartReplication(Npgsql.Replication.PhysicalReplicationSlot! slot, System.Threading.CancellationToken cancellationToken) -> System.Collections.Generic.IAsyncEnumerable<Npgsql.Replication.XLogDataMessage!>!
@@ -322,3 +401,5 @@ override Npgsql.NpgsqlFactory.CreateDataSource(string! connectionString) -> Syst
 static Npgsql.NpgsqlDataSource.Create(string! connectionString) -> Npgsql.NpgsqlDataSource!
 static Npgsql.NpgsqlDataSource.Create(Npgsql.NpgsqlConnectionStringBuilder! connectionStringBuilder) -> Npgsql.NpgsqlDataSource!
 virtual Npgsql.NpgsqlCommand.Clone() -> Npgsql.NpgsqlCommand!
+*REMOVED*Npgsql.NpgsqlConnection.Settings.get -> Npgsql.NpgsqlConnectionStringBuilder!
+Npgsql.NpgsqlConnection.Settings.get -> Npgsql.NpgsqlConnectionSettings!

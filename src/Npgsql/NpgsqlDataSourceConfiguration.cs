@@ -6,6 +6,6 @@ namespace Npgsql;
 
 record NpgsqlDataSourceConfiguration(
     NpgsqlLoggingConfiguration LoggingConfiguration,
-    Func<NpgsqlConnectionStringBuilder, CancellationToken, ValueTask<string>>? PeriodicPasswordProvider,
+    Func<NpgsqlConnectionSettings, CancellationToken, ValueTask<string>>? PeriodicPasswordProvider,
     TimeSpan PeriodicPasswordSuccessRefreshInterval,
     TimeSpan PeriodicPasswordFailureRefreshInterval);

@@ -88,7 +88,7 @@ class WriteBufferTests
     public void SetUp()
     {
         Underlying = new MemoryStream();
-        WriteBuffer = new NpgsqlWriteBuffer(null, Underlying, null, NpgsqlReadBuffer.DefaultSize, PGUtil.UTF8Encoding);
+        WriteBuffer = new NpgsqlWriteBuffer(null, Underlying, null, NpgsqlConnectionDefaults.WriteBufferSize, PGUtil.UTF8Encoding);
     }
 #pragma warning restore CS8625
 

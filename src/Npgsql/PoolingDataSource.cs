@@ -76,7 +76,7 @@ class PoolingDataSource : NpgsqlDataSource
     internal sealed override bool OwnsConnectors => true;
 
     internal PoolingDataSource(
-        NpgsqlConnectionStringBuilder settings,
+        NpgsqlSingleHostConnectionSettings settings,
         NpgsqlDataSourceConfiguration dataSourceConfig,
         NpgsqlMultiHostDataSource? parentPool = null)
         : base(settings, dataSourceConfig)
@@ -343,6 +343,9 @@ class PoolingDataSource : NpgsqlDataSource
             _isClearing = 0;
         }
     }
+
+    internal override bool Replace
+        => _clearCounter > 0;
 
     void CloseConnector(NpgsqlConnector connector)
     {

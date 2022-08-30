@@ -560,7 +560,7 @@ public class MultipleHostsTests : TestBase
     [Test, NonParallelizable]
     public async Task Cluster_offline_state_on_query_execution_pg_non_critical_failure()
     {
-        PoolManager.Reset();
+        PoolManager.ClearAll();
         // We reset the cluster's state
         // Because other tests might have marked the host as disabled
         ClusterStateCache.Clear();
@@ -833,7 +833,7 @@ public class MultipleHostsTests : TestBase
     [Test, NonParallelizable]
     public void IntegrationTest([Values] bool loadBalancing, [Values] bool alwaysCheckHostState)
     {
-        PoolManager.Reset();
+        PoolManager.ClearAll();
         // We reset the cluster's state for multiple hosts
         // Because other tests might have marked some of the hosts as disabled
         ClusterStateCache.Clear();
@@ -866,7 +866,7 @@ public class MultipleHostsTests : TestBase
 
         Assert.AreEqual(8, PoolManager.Pools.Count(x => x.Key is not null));
 
-        PoolManager.Reset();
+        PoolManager.ClearAll();
 
         Task Client(NpgsqlConnectionStringBuilder csb, string targetSessionAttributes)
         {

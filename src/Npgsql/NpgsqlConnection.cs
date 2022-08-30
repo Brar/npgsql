@@ -6,6 +6,7 @@ using System.Data.Common;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
@@ -111,7 +112,7 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
     /// <summary>
     /// The default TCP/IP port for PostgreSQL.
     /// </summary>
-    public const int DefaultPort = 5432;
+    public const int DefaultPort = NpgsqlConnectionDefaults.Port;
 
     /// <summary>
     /// Maximum value for connection timeout.
@@ -187,14 +188,13 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
         // Connection string hasn't been seen before. Check for empty and parse (slow one-time path).
         if (_connectionString == string.Empty)
         {
-            Settings = DefaultSettings;
+            Settings = NpgsqlConnectionSettings.Default;
             _dataSource = null;
             return;
         }
 
         var settings = new NpgsqlConnectionStringBuilder(_connectionString);
-        settings.PostProcessAndValidate();
-        Settings = settings;
+        Settings = settings.PostProcessValidateAndFreeze(_connectionLogger);
 
         // The connection string may be equivalent to one that has already been seen though (e.g. different
         // ordering). Have NpgsqlConnectionStringBuilder produce a canonical string representation
@@ -258,10 +258,13 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
             throw new InvalidOperationException("The ConnectionString property has not been initialized.");
         }
 
+        if (_dataSource.Replace)
+            SetupDataSource();
+
         FullState = ConnectionState.Connecting;
         _userFacingConnectionString = _dataSource.ConnectionString;
         _connectionLogger = _dataSource.LoggingConfiguration.ConnectionLogger;
-        LogMessages.OpeningConnection(_connectionLogger, Settings.Host!, Settings.Port, Settings.Database!, _userFacingConnectionString);
+        LogMessages.OpeningConnection(_connectionLogger, Settings.SafeLogHost, Settings.SafeLogPort, Settings.Database, _userFacingConnectionString);
 
         if (Settings.Multiplexing)
         {
@@ -278,7 +281,9 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
             if (!((MultiplexingDataSource)_dataSource).IsBootstrapped)
                 return BootstrapMultiplexing(async, cancellationToken);
 
-            LogMessages.OpenedMultiplexingConnection(_connectionLogger, Settings.Host!, Settings.Port, Settings.Database!, _userFacingConnectionString);
+            // Multiplexing connections currently are always single host 
+            var singleHostSettings = (NpgsqlSingleHostConnectionSettings)Settings;
+            LogMessages.OpenedMultiplexingConnection(_connectionLogger, singleHostSettings.SafeLogHost, singleHostSettings.Port, singleHostSettings.Database, _userFacingConnectionString);
             FullState = ConnectionState.Open;
 
             return Task.CompletedTask;
@@ -328,7 +333,7 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
                 if (enlistToTransaction is not null)
                     EnlistTransaction(enlistToTransaction);
 
-                LogMessages.OpenedConnection(_connectionLogger, Host!, Port, Database, _userFacingConnectionString, connector.Id);
+                LogMessages.OpenedConnection(_connectionLogger, connector.Host, connector.Port, connector.Database, _userFacingConnectionString, connector.Id);
                 FullState = ConnectionState.Open;
             }
             catch
@@ -354,7 +359,10 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
             {
                 var timeout = new NpgsqlTimeout(TimeSpan.FromSeconds(ConnectionTimeout));
                 await ((MultiplexingDataSource)NpgsqlDataSource).BootstrapMultiplexing(this, timeout, async, cancellationToken);
-                LogMessages.OpenedMultiplexingConnection(_connectionLogger, Settings.Host!, Settings.Port, Settings.Database!, _userFacingConnectionString);
+
+                // Multiplexing connections currently are always single host
+                var singleHostSettings = (NpgsqlSingleHostConnectionSettings)Settings;
+                LogMessages.OpenedMultiplexingConnection(_connectionLogger, singleHostSettings.SafeLogHost, singleHostSettings.Port, singleHostSettings.Database, _userFacingConnectionString);
                 FullState = ConnectionState.Open;
             }
             catch
@@ -828,7 +836,8 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
             ReleaseCloseLock();
 
             FullState = ConnectionState.Closed;
-            LogMessages.ClosedMultiplexingConnection(_connectionLogger, Settings.Host!, Settings.Port, Settings.Database!, _userFacingConnectionString);
+            var singleHostSettings = (NpgsqlSingleHostConnectionSettings)Settings;
+            LogMessages.ClosedMultiplexingConnection(_connectionLogger, singleHostSettings.SafeLogHost, singleHostSettings.Port, singleHostSettings.Database, _userFacingConnectionString);
 
             return Task.CompletedTask;
         }
@@ -844,7 +853,7 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
         try
         {
             var connector = Connector;
-            LogMessages.ClosingConnection(_connectionLogger, Settings.Host!, Settings.Port, Settings.Database!, _userFacingConnectionString, connector.Id);
+            LogMessages.ClosingConnection(_connectionLogger, connector.Host, connector.Port, connector.Database, _userFacingConnectionString, connector.Id);
 
             if (connector.CurrentReader != null || connector.CurrentCopyOperation != null)
             {
@@ -857,7 +866,7 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
                     Debug.Assert(Connector is null);
 
                     FullState = ConnectionState.Closed;
-                    LogMessages.ClosedMultiplexingConnection(_connectionLogger, Settings.Host!, Settings.Port, Settings.Database!, _userFacingConnectionString);
+                    LogMessages.ClosedMultiplexingConnection(_connectionLogger, connector.Host, connector.Port, connector.Database, _userFacingConnectionString);
                     return;
                 }
             }
@@ -913,7 +922,7 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
                 }
             }
 
-            LogMessages.ClosedConnection(_connectionLogger, Settings.Host!, Settings.Port, Settings.Database!, _userFacingConnectionString, connector.Id);
+            LogMessages.ClosedConnection(_connectionLogger, connector.Host, connector.Port, connector.Database, _userFacingConnectionString, connector.Id);
             Connector = null;
             ConnectorBindingScope = ConnectorBindingScope.None;
             FullState = ConnectionState.Closed;
@@ -1996,9 +2005,8 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
         Close();
 
         _dataSource = null;
-        Settings = Settings.Clone();
-        Settings.Database = dbName;
-        ConnectionString = Settings.ToString();
+        Settings = Settings with { Database = dbName };
+        ConnectionString = Settings.CreateConnectionString();
 
         Open();
     }

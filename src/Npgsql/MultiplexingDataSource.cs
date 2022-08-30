@@ -48,7 +48,7 @@ sealed class MultiplexingDataSource : PoolingDataSource
     const int MultiplexingCommandChannelBound = 4096;
 
     internal MultiplexingDataSource(
-        NpgsqlConnectionStringBuilder settings,
+        NpgsqlSingleHostConnectionSettings settings,
         NpgsqlDataSourceConfiguration dataSourceConfig,
         NpgsqlMultiHostDataSource? parentPool = null)
         : base(settings, dataSourceConfig, parentPool)

@@ -27,7 +27,7 @@ public class GeoJSONTypeHandlerResolver : TypeHandlerResolver
         _geographyAsDefault = geographyAsDefault;
 
         var crsMap = (options & (GeoJSONOptions.ShortCRS | GeoJSONOptions.LongCRS)) == GeoJSONOptions.None
-            ? default : CRSMaps.GetOrAdd(connector.Settings.ConnectionString, _ =>
+            ? default : CRSMaps.GetOrAdd(connector.Settings.ToString(), _ =>
             {
                 var builder = new CrsMapBuilder();
                 using (var cmd = connector.CreateCommand(

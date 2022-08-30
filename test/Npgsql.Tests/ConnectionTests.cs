@@ -661,7 +661,7 @@ public class ConnectionTests : MultiplexingTestBase
     public void Empty_constructor()
     {
         var conn = new NpgsqlConnection();
-        Assert.That(conn.ConnectionTimeout, Is.EqualTo(NpgsqlConnectionStringBuilder.DefaultTimeout));
+        Assert.That(conn.ConnectionTimeout, Is.EqualTo(NpgsqlConnectionDefaults.Timeout));
         Assert.That(conn.ConnectionString, Is.SameAs(string.Empty));
         Assert.That(() => conn.Open(), Throws.Exception.TypeOf<InvalidOperationException>());
     }
@@ -688,7 +688,7 @@ public class ConnectionTests : MultiplexingTestBase
         var conn = new NpgsqlConnection(ConnectionString);
         conn.ConnectionString = null;
         Assert.That(conn.ConnectionString, Is.SameAs(string.Empty));
-        Assert.That(conn.Settings.Host, Is.Null);
+        Assert.That(conn.Settings is NpgsqlSingleHostConnectionSettings { Host: null }, Is.True);
         Assert.That(() => conn.Open(), Throws.Exception.TypeOf<InvalidOperationException>());
     }
 
@@ -698,7 +698,7 @@ public class ConnectionTests : MultiplexingTestBase
         var conn = new NpgsqlConnection(ConnectionString);
         conn.ConnectionString = "";
         Assert.That(conn.ConnectionString, Is.SameAs(string.Empty));
-        Assert.That(conn.Settings.Host, Is.Null);
+        Assert.That(conn.Settings is NpgsqlSingleHostConnectionSettings { Host: null }, Is.True);
         Assert.That(() => conn.Open(), Throws.Exception.TypeOf<InvalidOperationException>());
     }
 

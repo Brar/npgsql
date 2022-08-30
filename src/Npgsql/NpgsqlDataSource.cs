@@ -24,12 +24,12 @@ public abstract class NpgsqlDataSource : DbDataSource
     /// Contains the connection string returned to the user from <see cref="NpgsqlConnection.ConnectionString"/>
     /// after the connection has been opened. Does not contain the password unless Persist Security Info=true.
     /// </summary>
-    internal NpgsqlConnectionStringBuilder Settings { get; }
+    internal NpgsqlConnectionSettings Settings { get; }
 
     internal NpgsqlDataSourceConfiguration Configuration { get; }
     internal NpgsqlLoggingConfiguration LoggingConfiguration { get; }
 
-    readonly Func<NpgsqlConnectionStringBuilder, CancellationToken, ValueTask<string>>? _periodicPasswordProvider;
+    readonly Func<NpgsqlConnectionSettings, CancellationToken, ValueTask<string>>? _periodicPasswordProvider;
     readonly TimeSpan _periodicPasswordSuccessRefreshInterval, _periodicPasswordFailureRefreshInterval;
 
     readonly Timer? _passwordProviderTimer;
@@ -49,13 +49,11 @@ public abstract class NpgsqlDataSource : DbDataSource
     readonly ILogger _connectionLogger;
 
     internal NpgsqlDataSource(
-        NpgsqlConnectionStringBuilder settings,
+        NpgsqlConnectionSettings settings,
         NpgsqlDataSourceConfiguration dataSourceConfig)
     {
         Settings = settings;
-        ConnectionString = settings.PersistSecurityInfo
-            ? settings.ToString()
-            : settings.ToStringWithoutPassword();
+        ConnectionString = settings.CreateConnectionString();
 
         Configuration = dataSourceConfig;
 
@@ -224,6 +222,8 @@ public abstract class NpgsqlDataSource : DbDataSource
     internal abstract void Return(NpgsqlConnector connector);
 
     internal abstract void Clear();
+    
+    internal abstract bool Replace { get; }
 
     internal abstract bool OwnsConnectors { get; }
 

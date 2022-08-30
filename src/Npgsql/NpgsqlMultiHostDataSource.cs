@@ -26,28 +26,14 @@ public sealed class NpgsqlMultiHostDataSource : NpgsqlDataSource
 
     volatile int _roundRobinIndex = -1;
 
-    internal NpgsqlMultiHostDataSource(NpgsqlConnectionStringBuilder settings, NpgsqlDataSourceConfiguration dataSourceConfig)
+    internal NpgsqlMultiHostDataSource(NpgsqlMultiHostConnectionSettings settings, NpgsqlDataSourceConfiguration dataSourceConfig)
         : base(settings, dataSourceConfig)
     {
-        var hosts = settings.Host!.Split(',');
-        _pools = new NpgsqlDataSource[hosts.Length];
-        for (var i = 0; i < hosts.Length; i++)
-        {
-            var poolSettings = settings.Clone();
-            Debug.Assert(!poolSettings.Multiplexing);
-            var host = hosts[i].AsSpan().Trim();
-            if (NpgsqlConnectionStringBuilder.TrySplitHostPort(host, out var newHost, out var newPort))
-            {
-                poolSettings.Host = newHost;
-                poolSettings.Port = newPort;
-            }
-            else
-                poolSettings.Host = host.ToString();
-
+        _pools = new NpgsqlDataSource[settings.Hosts.Length];
+        for (var i = 0; i < _pools.Length; i++)
             _pools[i] = settings.Pooling
-                ? new PoolingDataSource(poolSettings, dataSourceConfig, this)
-                : new UnpooledDataSource(poolSettings, dataSourceConfig);
-        }
+                ? new PoolingDataSource(settings.GetNpgsqlSingleHostConnectionSettings(i), dataSourceConfig, this)
+                : new UnpooledDataSource(settings.GetNpgsqlSingleHostConnectionSettings(i), dataSourceConfig);
 
         var targetSessionAttributeValues = Enum.GetValues(typeof(TargetSessionAttributes)).Cast<TargetSessionAttributes>().ToArray();
         _wrappers = new MultiHostDataSourceWrapper[targetSessionAttributeValues.Max(t => (int)t) + 1];
@@ -137,7 +123,9 @@ public sealed class NpgsqlMultiHostDataSource : NpgsqlDataSource
     }
 
     static ClusterState GetClusterState(NpgsqlDataSource pool, bool ignoreExpiration = false)
-        => GetClusterState(pool.Settings.Host!, pool.Settings.Port, ignoreExpiration);
+        => GetClusterState(
+            ((NpgsqlSingleHostConnectionSettings)pool.Settings).SafeLogHost,
+            ((NpgsqlSingleHostConnectionSettings)pool.Settings).Port, ignoreExpiration);
 
     static ClusterState GetClusterState(string host, int port, bool ignoreExpiration)
         => ClusterStateCache.GetClusterState(host, port, ignoreExpiration);
@@ -266,7 +254,7 @@ public sealed class NpgsqlMultiHostDataSource : NpgsqlDataSource
         var poolIndex = conn.Settings.LoadBalanceHosts ? GetRoundRobinIndex() : 0;
 
         var timeoutPerHost = timeout.IsSet ? timeout.CheckAndGetTimeLeft() : TimeSpan.Zero;
-        var preferredType = GetTargetSessionAttributes(conn);
+        var preferredType = conn.Settings.TargetSessionAttributes;
         var checkUnpreferred =
             preferredType == TargetSessionAttributes.PreferPrimary ||
             preferredType == TargetSessionAttributes.PreferStandby;
@@ -329,9 +317,13 @@ public sealed class NpgsqlMultiHostDataSource : NpgsqlDataSource
 
     internal override void Clear()
     {
+        _replace = true;
         foreach (var pool in _pools)
             pool.Clear();
     }
+
+    bool _replace;
+    internal override bool Replace => _replace;
 
     internal override (int Total, int Idle, int Busy) Statistics
     {
@@ -362,7 +354,7 @@ public sealed class NpgsqlMultiHostDataSource : NpgsqlDataSource
                 return false;
             }
 
-            var preferredType = GetTargetSessionAttributes(connection);
+            var preferredType = connection.Settings.TargetSessionAttributes;
             // First try to get a valid preferred connector.
             if (TryGetValidConnector(list, preferredType, IsPreferred, out connector))
             {
@@ -401,10 +393,4 @@ public sealed class NpgsqlMultiHostDataSource : NpgsqlDataSource
             return false;
         }
     }
-
-    static TargetSessionAttributes GetTargetSessionAttributes(NpgsqlConnection connection)
-        => connection.Settings.TargetSessionAttributesParsed ??
-           (PostgresEnvironment.TargetSessionAttributes is { } s
-               ? NpgsqlConnectionStringBuilder.ParseTargetSessionAttributes(s)
-               : TargetSessionAttributes.Any);
 }

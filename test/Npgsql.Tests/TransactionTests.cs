@@ -336,7 +336,7 @@ public class TransactionTests : MultiplexingTestBase
         var backendProcessId = conn.ProcessID;
         using (var badCmd = new NpgsqlCommand("SEL", conn))
         {
-            badCmd.CommandTimeout = NpgsqlCommand.DefaultTimeout + 1;
+            badCmd.CommandTimeout = NpgsqlConnectionDefaults.CommandTimeout + 1;
             Assert.That(() => badCmd.ExecuteNonQuery(), Throws.Exception.TypeOf<PostgresException>());
         }
         // Connection now in failed transaction state, and a custom timeout is in place

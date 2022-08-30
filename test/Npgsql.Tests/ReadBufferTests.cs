@@ -90,7 +90,7 @@ class ReadBufferTests
     public void SetUp()
     {
         var stream = new MockStream();
-        ReadBuffer = new NpgsqlReadBuffer(null, stream, null, NpgsqlReadBuffer.DefaultSize, PGUtil.UTF8Encoding, PGUtil.RelaxedUTF8Encoding);
+        ReadBuffer = new NpgsqlReadBuffer(null, stream, null, NpgsqlConnectionDefaults.ReadBufferSize, PGUtil.UTF8Encoding, PGUtil.RelaxedUTF8Encoding);
         Writer = stream.Writer;
     }
 #pragma warning restore CS8625

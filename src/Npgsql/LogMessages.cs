@@ -18,7 +18,7 @@ static partial class LogMessages
         EventId = NpgsqlEventId.OpeningConnection,
         Level = LogLevel.Trace,
         Message = "Opening connection to {Host}:{Port}/{Database}...")]
-    internal static partial void OpeningConnection(ILogger logger, string Host, int Port, string Database, string ConnectionString);
+    internal static partial void OpeningConnection(ILogger logger, string Host, string Port, string Database, string ConnectionString);
 
     [LoggerMessage(
         EventId = NpgsqlEventId.OpenedConnection,

@@ -7,10 +7,14 @@ using System.Data.Common;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Net;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using Npgsql.Internal;
 using Npgsql.Netstandard20;
 using Npgsql.Properties;
 using Npgsql.Replication;
+using static Npgsql.NpgsqlConnectionDefaults;
 
 namespace Npgsql;
 
@@ -30,9 +34,9 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     internal string DataSourceCached
         => _dataSourceCached ??= _host is null
             ? string.Empty
-            : IsUnixSocket(_host, _port, out var socketPath, replaceForAbstract: false)
+            : IsUnixSocket(_host, Port, out var socketPath, replaceForAbstract: false)
                 ? socketPath
-                : $"tcp://{_host}:{_port}";
+                : $"tcp://{_host}:{Port}";
 
     // Note that we can't cache the result due to nullable's assignment not being thread safe
     internal TimeSpan HostRecheckSecondsTranslated
@@ -227,21 +231,24 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Description("The TCP port of the PostgreSQL server.")]
     [DisplayName("Port")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(NpgsqlConnection.DefaultPort)]
     public int Port
     {
-        get => _port;
+        get => UserRequestedPort ?? NpgsqlConnectionDefaults.Port;
         set
         {
-            if (value <= 0)
+            if (value <= 0 || value > ushort.MaxValue)
                 throw new ArgumentOutOfRangeException(nameof(value), value, "Invalid port: " + value);
 
-            _port = value;
+            UserRequestedPort = value;
             SetValue(nameof(Port), value);
             _dataSourceCached = null;
         }
     }
-    int _port;
+    /// <summary>
+    /// The port that was explicitly requested via the connection string or by setting
+    /// the <see cref="Port"/> property of <see cref="NpgsqlConnectionStringBuilder"/>.
+    /// </summary>
+    internal int? UserRequestedPort { get; private set; }
 
     ///<summary>
     /// The PostgreSQL database to connect to.
@@ -378,8 +385,9 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Category("Connection")]
     [Description("Gets or sets the client_encoding parameter.")]
     [DisplayName("Client Encoding")]
+    [DefaultValue(NpgsqlConnectionDefaults.ClientEncoding)]
     [NpgsqlConnectionStringProperty]
-    public string? ClientEncoding
+    public string ClientEncoding
     {
         get => _clientEncoding;
         set
@@ -388,7 +396,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
             SetValue(nameof(ClientEncoding), value);
         }
     }
-    string? _clientEncoding;
+    string _clientEncoding = NpgsqlConnectionDefaults.ClientEncoding;
 
     /// <summary>
     /// Gets or sets the .NET encoding that will be used to encode/decode PostgreSQL string data.
@@ -396,7 +404,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Category("Connection")]
     [Description("Gets or sets the .NET encoding that will be used to encode/decode PostgreSQL string data.")]
     [DisplayName("Encoding")]
-    [DefaultValue("UTF8")]
+    [DefaultValue(NpgsqlConnectionDefaults.Encoding)]
     [NpgsqlConnectionStringProperty]
     public string Encoding
     {
@@ -407,7 +415,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
             SetValue(nameof(Encoding), value);
         }
     }
-    string _encoding = "UTF8";
+    string _encoding = NpgsqlConnectionDefaults.Encoding;
 
     /// <summary>
     /// Gets or sets the PostgreSQL session timezone, in Olson/IANA database format.
@@ -437,7 +445,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Category("Security")]
     [Description("Controls whether SSL is required, disabled or preferred, depending on server support.")]
     [DisplayName("SSL Mode")]
-    [DefaultValue(SslMode.Prefer)]
+    [DefaultValue(NpgsqlConnectionDefaults.SslMode)]
     [NpgsqlConnectionStringProperty]
     public SslMode SslMode
     {
@@ -588,7 +596,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Description("The Kerberos service name to be used for authentication.")]
     [DisplayName("Kerberos Service Name")]
     [NpgsqlConnectionStringProperty("Krbsrvname")]
-    [DefaultValue("postgres")]
+    [DefaultValue(NpgsqlConnectionDefaults.KerberosServiceName)]
     public string KerberosServiceName
     {
         get => _kerberosServiceName;
@@ -598,10 +606,18 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
             SetValue(nameof(KerberosServiceName), value);
         }
     }
-    string _kerberosServiceName = "postgres";
+    string _kerberosServiceName = NpgsqlConnectionDefaults.KerberosServiceName;
 
     /// <summary>
-    /// The Kerberos realm to be used for authentication.
+    /// If set to <see langword="true"/>, the realm name from the authenticated user principal,
+    /// for example username@realm, is included in the system user name that's passed when
+    /// authenticating via Kerberos (SSPI/GSS).
+    /// This is the recommended configuration for PostgreSQL as, otherwise, it is impossible to
+    /// differentiate users with the same username who are from different realms.
+    /// The default for this parameter currently is <see langword="false"/> (meaning to not
+    /// include the realm in the system user name).
+    /// Since PostgreSQL 9.5 changed the default for this setting to <see langword="true"/> this
+    /// may also change in Npgsql in the future.
     /// </summary>
     [Category("Security")]
     [Description("The Kerberos realm to be used for authentication.")]
@@ -686,7 +702,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Description("Whether connection pooling should be used.")]
     [DisplayName("Pooling")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(true)]
+    [DefaultValue(NpgsqlConnectionDefaults.Pooling)]
     public bool Pooling
     {
         get => _pooling;
@@ -705,7 +721,6 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Description("The minimum connection pool size.")]
     [DisplayName("Minimum Pool Size")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(0)]
     public int MinPoolSize
     {
         get => _minPoolSize;
@@ -727,7 +742,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Description("The maximum connection pool size.")]
     [DisplayName("Maximum Pool Size")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(100)]
+    [DefaultValue(NpgsqlConnectionDefaults.MaxPoolSize)]
     public int MaxPoolSize
     {
         get => _maxPoolSize;
@@ -751,7 +766,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Description("The time to wait before closing unused connections in the pool if the count of all connections exceeds MinPoolSize.")]
     [DisplayName("Connection Idle Lifetime")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(300)]
+    [DefaultValue(NpgsqlConnectionDefaults.ConnectionIdleLifetime)]
     public int ConnectionIdleLifetime
     {
         get => _connectionIdleLifetime;
@@ -765,14 +780,14 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
 
     /// <summary>
     /// How many seconds the pool waits before attempting to prune idle connections that are beyond
-    /// idle lifetime (<see cref="ConnectionIdleLifetime"/>.
+    /// idle lifetime (<see cref="ConnectionIdleLifetime"/>).
     /// </summary>
     /// <value>The interval (in seconds). The default value is 10.</value>
     [Category("Pooling")]
     [Description("How many seconds the pool waits before attempting to prune idle connections that are beyond idle lifetime.")]
     [DisplayName("Connection Pruning Interval")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(10)]
+    [DefaultValue(NpgsqlConnectionDefaults.ConnectionPruningInterval)]
     public int ConnectionPruningInterval
     {
         get => _connectionPruningInterval;
@@ -817,7 +832,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Description("The time to wait (in seconds) while trying to establish a connection before terminating the attempt and generating an error.")]
     [DisplayName("Timeout")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(DefaultTimeout)]
+    [DefaultValue(NpgsqlConnectionDefaults.Timeout)]
     public int Timeout
     {
         get => _timeout;
@@ -831,9 +846,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
         }
     }
     int _timeout;
-
-    internal const int DefaultTimeout = 15;
-
+    
     /// <summary>
     /// The time to wait (in seconds) while trying to execute a command before terminating the attempt and generating an error.
     /// Defaults to 30 seconds.
@@ -842,7 +855,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Description("The time to wait (in seconds) while trying to execute a command before terminating the attempt and generating an error. Set to zero for infinity.")]
     [DisplayName("Command Timeout")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(NpgsqlCommand.DefaultTimeout)]
+    [DefaultValue(NpgsqlConnectionDefaults.CommandTimeout)]
     public int CommandTimeout
     {
         get => _commandTimeout;
@@ -864,7 +877,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Description("The time to wait (in seconds) while trying to execute a an internal command before terminating the attempt and generating an error. -1 uses CommandTimeout, 0 means no timeout.")]
     [DisplayName("Internal Command Timeout")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(-1)]
+    [DefaultValue(NpgsqlConnectionDefaults.InternalCommandTimeout)]
     public int InternalCommandTimeout
     {
         get => _internalCommandTimeout;
@@ -889,7 +902,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Description("After Command Timeout is reached (or user supplied cancellation token is cancelled) and command cancellation is attempted, Npgsql waits for this additional timeout (in milliseconds) before breaking the connection. Defaults to 2000, set to zero for infinity.")]
     [DisplayName("Cancellation Timeout")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(2000)]
+    [DefaultValue(NpgsqlConnectionDefaults.CancellationTimeout)]
     public int CancellationTimeout
     {
         get => _cancellationTimeout;
@@ -1135,7 +1148,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Description("Determines the size of the internal buffer Npgsql uses when reading. Increasing may improve performance if transferring large values from the database.")]
     [DisplayName("Read Buffer Size")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(NpgsqlReadBuffer.DefaultSize)]
+    [DefaultValue(NpgsqlConnectionDefaults.ReadBufferSize)]
     public int ReadBufferSize
     {
         get => _readBufferSize;
@@ -1154,7 +1167,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Description("Determines the size of the internal buffer Npgsql uses when writing. Increasing may improve performance if transferring large values to the database.")]
     [DisplayName("Write Buffer Size")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(NpgsqlWriteBuffer.DefaultSize)]
+    [DefaultValue(NpgsqlConnectionDefaults.WriteBufferSize)]
     public int WriteBufferSize
     {
         get => _writeBufferSize;
@@ -1233,7 +1246,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     [Description("The minimum number of usages an SQL statement is used before it's automatically prepared. Defaults to 5.")]
     [DisplayName("Auto Prepare Min Usages")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(5)]
+    [DefaultValue(NpgsqlConnectionDefaults.AutoPrepareMinUsages)]
     public int AutoPrepareMinUsages
     {
         get => _autoPrepareMinUsages;
@@ -1378,7 +1391,7 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
                  "flushing to the network.")]
     [DisplayName("Write Coalescing Buffer Threshold Bytes")]
     [NpgsqlConnectionStringProperty]
-    [DefaultValue(1000)]
+    [DefaultValue(NpgsqlConnectionDefaults.WriteCoalescingBufferThresholdBytes)]
     public int WriteCoalescingBufferThresholdBytes
     {
         get => _writeCoalescingBufferThresholdBytes;
@@ -1586,6 +1599,52 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
                 Port = newPort;
             }
         }
+    }
+
+    internal NpgsqlConnectionSettings PostProcessValidateAndFreeze(ILogger connectionLogger)
+    {
+        var clientEncoding = InferClientEncoding(ClientEncoding);
+        var user = InferUser(Username, IncludeRealm, connectionLogger);
+        var database = InferDatabase(Database, user);
+        var encoding = InferEncoding(Encoding);
+        var (hosts, hostAddresses, ports) = InferHostsAndHostAddressesAndPorts(Host, null, Port);
+        var kerberosServiceName = InferKerberosServiceName(KerberosServiceName);
+
+        NpgsqlConnectionSettings settings;
+        switch (hosts)
+        {
+        case { Length: > 1 } when hostAddresses is { Length: > 1 }:
+            settings = new NpgsqlMultiHostConnectionSettings(clientEncoding, database, DataSourceCached, encoding, kerberosServiceName,
+                hosts, hostAddresses, ports);
+            break;
+        case { Length: > 1 }:
+            settings = new NpgsqlMultiHostConnectionSettings(clientEncoding, database, DataSourceCached, encoding, kerberosServiceName,
+                Array.ConvertAll(hosts, x => x! ?? throw new FormatException("Host name cannot be null.")) , ports);
+            break;
+        default:
+        {
+            if (hostAddresses is { Length: > 1 })
+            {
+                settings = new NpgsqlMultiHostConnectionSettings(clientEncoding, database, DataSourceCached, encoding, kerberosServiceName,
+                    Array.ConvertAll(hostAddresses, x => x! ?? throw new FormatException("Host name cannot be null.")), ports);
+            }
+            else if (hosts is { Length: 1 })
+            {
+                settings = new NpgsqlSingleHostConnectionSettings(clientEncoding, database, DataSourceCached, encoding, kerberosServiceName, hosts[0]!, ports[0]);
+            }
+            else if (hostAddresses is { Length: 1 })
+            {
+                settings = new NpgsqlSingleHostConnectionSettings(clientEncoding, database, DataSourceCached, encoding, kerberosServiceName, hostAddresses[0]!, ports[0]);
+            }
+            else
+            {
+                throw new InvalidOperationException("Invalid state");
+            }
+
+            break;
+        }
+        }
+        return settings;
     }
 
     internal string ToStringWithoutPassword()

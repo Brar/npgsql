@@ -9,7 +9,7 @@ namespace Npgsql;
 
 sealed class UnpooledDataSource : NpgsqlDataSource
 {
-    public UnpooledDataSource(NpgsqlConnectionStringBuilder settings, NpgsqlDataSourceConfiguration dataSourceConfig)
+    public UnpooledDataSource(NpgsqlSingleHostConnectionSettings settings, NpgsqlDataSourceConfiguration dataSourceConfig)
         : base(settings, dataSourceConfig)
     {
     }
@@ -47,7 +47,11 @@ sealed class UnpooledDataSource : NpgsqlDataSource
         connector.Close();
     }
 
-    internal override void Clear() {}
+    internal override void Clear() 
+        => _replace = true;
+
+    bool _replace;
+    internal override bool Replace => _replace;
 
     internal override bool TryRentEnlistedPending(Transaction transaction, NpgsqlConnection connection,
         [NotNullWhen(true)] out NpgsqlConnector? connector)

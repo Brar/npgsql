@@ -23,7 +23,7 @@ class PoolManagerTests : TestBase
     [Test]
     public void Many_pools()
     {
-        PoolManager.Reset();
+        PoolManager.ClearAll();
         for (var i = 0; i < 15; i++)
         {
             var connString = new NpgsqlConnectionStringBuilder(ConnectionString)
@@ -33,7 +33,7 @@ class PoolManagerTests : TestBase
             using var conn = new NpgsqlConnection(connString);
             conn.Open();
         }
-        PoolManager.Reset();
+        PoolManager.ClearAll();
     }
 #endif
 
@@ -69,8 +69,8 @@ class PoolManagerTests : TestBase
     }
 
     [SetUp]
-    public void Setup() => PoolManager.Reset();
+    public void Setup() => PoolManager.ClearAll();
 
     [TearDown]
-    public void Teardown() => PoolManager.Reset();
+    public void Teardown() => PoolManager.ClearAll();
 }

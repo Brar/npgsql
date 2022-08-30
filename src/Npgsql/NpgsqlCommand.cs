@@ -81,13 +81,7 @@ public class NpgsqlCommand : DbCommand, ICloneable, IComponent
     static readonly SingleThreadSynchronizationContext SingleThreadSynchronizationContext = new("NpgsqlRemainingAsyncSendWorker");
 
     #endregion Fields
-
-    #region Constants
-
-    internal const int DefaultTimeout = 30;
-
-    #endregion
-
+    
     #region Constructors
 
     static NpgsqlCommand()
@@ -192,10 +186,10 @@ public class NpgsqlCommand : DbCommand, ICloneable, IComponent
     /// Gets or sets the wait time (in seconds) before terminating the attempt  to execute a command and generating an error.
     /// </summary>
     /// <value>The time (in seconds) to wait for the command to execute. The default value is 30 seconds.</value>
-    [DefaultValue(DefaultTimeout)]
+    [DefaultValue(NpgsqlConnectionDefaults.CommandTimeout)]
     public override int CommandTimeout
     {
-        get => _timeout ?? (InternalConnection?.CommandTimeout ?? DefaultTimeout);
+        get => _timeout ?? (InternalConnection?.CommandTimeout ?? NpgsqlConnectionDefaults.CommandTimeout);
         set
         {
             if (value < 0) {

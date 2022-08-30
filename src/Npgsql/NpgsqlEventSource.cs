@@ -86,6 +86,22 @@ sealed class NpgsqlEventSource : EventSource
 #endif
     }
 
+    internal void DataSourceRemoved(NpgsqlDataSource dataSource)
+    {
+#if !NETSTANDARD2_0
+        lock (_dataSourcesLock)
+        {
+            _dataSources.Remove(dataSource, out var value);
+            if (!value.HasValue)
+                return;
+
+            var (idle, busy) = value.Value;
+            idle.Dispose();
+            busy.Dispose();
+        }
+#endif
+    }
+
     internal void MultiplexingBatchSent(int numCommands, Stopwatch stopwatch)
     {
         // TODO: CAS loop instead of 3 separate interlocked operations?
@@ -197,8 +213,8 @@ sealed class NpgsqlEventSource : EventSource
                     if (!_dataSources[dataSource].HasValue)
                     {
                         _dataSources[dataSource] = (
-                            new PollingCounter($"Idle Connections ({dataSource.Settings.ToStringWithoutPassword()}])", this, () => dataSource.Statistics.Idle),
-                            new PollingCounter($"Busy Connections ({dataSource.Settings.ToStringWithoutPassword()}])", this, () => dataSource.Statistics.Busy));
+                            new PollingCounter($"Idle Connections ({dataSource.Settings.CreateConnectionString(NpgsqlConnectionSettings.PasswordHandling.Exclude)}])", this, () => dataSource.Statistics.Idle),
+                            new PollingCounter($"Busy Connections ({dataSource.Settings.CreateConnectionString(NpgsqlConnectionSettings.PasswordHandling.Exclude)}])", this, () => dataSource.Statistics.Busy));
                     }
                 }
             }

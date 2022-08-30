@@ -9,12 +9,12 @@ readonly struct NpgsqlDatabaseInfoCacheKey : IEquatable<NpgsqlDatabaseInfoCacheK
     public readonly string? Database;
     public readonly ServerCompatibilityMode CompatibilityMode;
 
-    public NpgsqlDatabaseInfoCacheKey(NpgsqlConnectionStringBuilder connectionString)
+    public NpgsqlDatabaseInfoCacheKey(NpgsqlSingleHostConnectionSettings settings)
     {
-        Port = connectionString.Port;
-        Host = connectionString.Host;
-        Database = connectionString.Database;
-        CompatibilityMode = connectionString.ServerCompatibilityMode;
+        Port = settings.Port;
+        Host = settings.Host;
+        Database = settings.Database;
+        CompatibilityMode = settings.ServerCompatibilityMode;
     }
 
     public bool Equals(NpgsqlDatabaseInfoCacheKey other) =>

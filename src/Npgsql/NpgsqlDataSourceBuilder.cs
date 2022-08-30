@@ -14,7 +14,7 @@ public class NpgsqlDataSourceBuilder
     ILoggerFactory? _loggerFactory;
     bool _sensitiveDataLoggingEnabled;
 
-    Func<NpgsqlConnectionStringBuilder, CancellationToken, ValueTask<string>>? _periodicPasswordProvider;
+    Func<NpgsqlConnectionSettings, CancellationToken, ValueTask<string>>? _periodicPasswordProvider;
     TimeSpan _periodicPasswordSuccessRefreshInterval, _periodicPasswordFailureRefreshInterval;
 
     /// <summary>
@@ -78,7 +78,7 @@ public class NpgsqlDataSourceBuilder
     /// </para>
     /// </remarks>
     public NpgsqlDataSourceBuilder UsePeriodicPasswordProvider(
-        Func<NpgsqlConnectionStringBuilder, CancellationToken, ValueTask<string>>? passwordProvider,
+        Func<NpgsqlConnectionSettings, CancellationToken, ValueTask<string>>? passwordProvider,
         TimeSpan successRefreshInterval,
         TimeSpan failureRefreshInterval)
     {
@@ -101,17 +101,17 @@ public class NpgsqlDataSourceBuilder
     /// </summary>
     public NpgsqlDataSource Build()
     {
-        ConnectionStringBuilder.PostProcessAndValidate();
-
-        if (_periodicPasswordProvider is not null &&
-            (ConnectionStringBuilder.Password is not null || ConnectionStringBuilder.Passfile is not null))
-        {
-            throw new NotSupportedException(NpgsqlStrings.CannotSetBothPasswordProviderAndPassword);
-        }
-
         var loggingConfiguration = _loggerFactory is null
             ? NpgsqlLoggingConfiguration.NullConfiguration
             : new NpgsqlLoggingConfiguration(_loggerFactory, _sensitiveDataLoggingEnabled);
+
+        var settings = ConnectionStringBuilder.PostProcessValidateAndFreeze(loggingConfiguration.ConnectionLogger);
+
+        if (_periodicPasswordProvider is not null &&
+            (settings.Password is not null || settings.Passfile is not null))
+        {
+            throw new NotSupportedException(NpgsqlStrings.CannotSetBothPasswordProviderAndPassword);
+        }
 
         var config = new NpgsqlDataSourceConfiguration(
             loggingConfiguration,
@@ -119,23 +119,39 @@ public class NpgsqlDataSourceBuilder
             _periodicPasswordSuccessRefreshInterval,
             _periodicPasswordFailureRefreshInterval);
 
-        if (ConnectionStringBuilder.Host!.Contains(","))
+        if (settings is NpgsqlMultiHostConnectionSettings multiHostSettings)
         {
-            if (ConnectionStringBuilder.TargetSessionAttributes is not null)
-                throw new InvalidOperationException(NpgsqlStrings.CannotSpecifyTargetSessionAttributes);
-            if (ConnectionStringBuilder.Multiplexing)
-                throw new NotSupportedException("Multiplexing is not supported with multiple hosts");
-            if (ConnectionStringBuilder.ReplicationMode != ReplicationMode.Off)
-                throw new NotSupportedException("Replication is not supported with multiple hosts");
+            // ToDo: move to ConnectionStringBuilder.PostProcessValidateAndFreeze()
+            // if (multiHostConnectionSettings.TargetSessionAttributes is not null)
+            //     throw new InvalidOperationException(NpgsqlStrings.CannotSpecifyTargetSessionAttributes);
+            // if (multiHostConnectionSettings.Multiplexing)
+            //     throw new NotSupportedException("Multiplexing is not supported with multiple hosts");
+            // if (multiHostConnectionSettings.ReplicationMode != ReplicationMode.Off)
+            //     throw new NotSupportedException("Replication is not supported with multiple hosts");
 
-            return new NpgsqlMultiHostDataSource(ConnectionStringBuilder, config);
+            // ToDo: Initialize default values here
+            // if (conn.Settings.Database == null)
+            //     conn.Settings.Database = username;
+            // static TargetSessionAttributes GetTargetSessionAttributes(NpgsqlConnection connection)
+            //     => connection.Settings.TargetSessionAttributesParsed ??
+            //        (PostgresEnvironment.TargetSessionAttributes is { } s
+            //            ? NpgsqlConnectionStringBuilder.ParseTargetSessionAttributes(s)
+            //            : TargetSessionAttributes.Any);
+
+
+
+            return new NpgsqlMultiHostDataSource(multiHostSettings, config);
+        }
+        if (settings is NpgsqlSingleHostConnectionSettings singleHostSettings)
+        {
+            return settings.Multiplexing
+                ? new MultiplexingDataSource(singleHostSettings, config)
+                : settings.Pooling
+                    ? new PoolingDataSource(singleHostSettings, config)
+                    : new UnpooledDataSource(singleHostSettings, config);
         }
 
-        return ConnectionStringBuilder.Multiplexing
-            ? new MultiplexingDataSource(ConnectionStringBuilder, config)
-            : ConnectionStringBuilder.Pooling
-                ? new PoolingDataSource(ConnectionStringBuilder, config)
-                : new UnpooledDataSource(ConnectionStringBuilder, config);
+        throw new NotSupportedException($"{settings.GetType()} is not supported. This is clearly a bug and shouldn't happen.");
     }
 
 #pragma warning disable RS0016
