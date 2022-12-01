@@ -29,6 +29,11 @@
     <NoWarn>$(NoWarn);CS8632;CS8600</NoWarn>
   </PropertyGroup>
 
+  <!-- Most of the current packeges support netstandard but generate build warnings for our older TFMs -->
+  <PropertyGroup Condition=" '$(TargetFramework)' == 'net5.0' OR '$(TargetFramework)' == 'netcoreapp3.1' ">
+    <SuppressTfmSupportBuildWarnings>true</SuppressTfmSupportBuildWarnings>
+  </PropertyGroup>
+
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)postgresql.png" Pack="true" PackagePath="" />
   </ItemGroup>
