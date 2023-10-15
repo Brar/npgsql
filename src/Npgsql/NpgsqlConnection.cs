@@ -41,7 +41,12 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
     /// <summary>
     /// The original connection string provided by the user, including the password.
     /// </summary>
-    string _connectionString = string.Empty;
+    string _originalConnectionString = string.Empty;
+
+    /// <summary>
+    /// The connection string used for pooling. Contains the inferred host if none was specified.
+    /// </summary>
+    string _poolConnectionString = string.Empty;
 
     ConnectionState _fullState;
 
@@ -171,23 +176,16 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
     void SetupDataSource()
     {
         // Fast path: a pool already corresponds to this exact version of the connection string.
-        if (PoolManager.Pools.TryGetValue(_connectionString, out _dataSource))
+        if (PoolManager.Pools.TryGetValue(_poolConnectionString, out _dataSource))
         {
             Settings = _dataSource.Settings;  // Great, we already have a pool
             return;
         }
 
-        // Connection string hasn't been seen before. Check for empty and parse (slow one-time path).
-        if (_connectionString == string.Empty)
-        {
-            Settings = DefaultSettings;
-            _dataSource = null;
-            return;
-        }
-
-        var settings = new NpgsqlConnectionStringBuilder(_connectionString);
+        var settings = new NpgsqlConnectionStringBuilder(_originalConnectionString);
         settings.PostProcessAndValidate();
         Settings = settings;
+        _poolConnectionString = settings.ConnectionString;
 
         // The connection string may be equivalent to one that has already been seen though (e.g. different
         // ordering). Have NpgsqlConnectionStringBuilder produce a canonical string representation
@@ -204,7 +202,7 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
 
             // The pool was found, but only under the canonical key - we're using a different version
             // for the first time. Map it via our own key for next time.
-            _dataSource = PoolManager.Pools.GetOrAdd(_connectionString, _dataSource);
+            _dataSource = PoolManager.Pools.GetOrAdd(_poolConnectionString, _dataSource);
             return;
         }
 
@@ -241,7 +239,7 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
         if (_dataSource is NpgsqlMultiHostDataSource multiHostDataSource2 && settings.TargetSessionAttributesParsed.HasValue)
             _dataSource = multiHostDataSource2.WithTargetSession(settings.TargetSessionAttributesParsed.Value);
 
-        _dataSource = PoolManager.Pools.GetOrAdd(_connectionString, _dataSource);
+        _dataSource = PoolManager.Pools.GetOrAdd(_poolConnectionString, _dataSource);
     }
 
     internal Task Open(bool async, CancellationToken cancellationToken)
@@ -251,7 +249,7 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
 
         if (_dataSource is null)
         {
-            Debug.Assert(string.IsNullOrEmpty(_connectionString));
+            Debug.Assert(string.IsNullOrEmpty(_originalConnectionString));
 
             throw new InvalidOperationException("The ConnectionString property has not been initialized.");
         }
@@ -379,7 +377,7 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
         {
             CheckClosed();
 
-            _userFacingConnectionString = _connectionString = value ?? string.Empty;
+            _userFacingConnectionString = _poolConnectionString = _originalConnectionString = value ?? string.Empty;
             SetupDataSource();
         }
     }
@@ -1802,7 +1800,7 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
         // default data source is brought in anyway).
         Debug.Assert(_dataSource is not null || _cloningInstantiator is not null);
         var conn = _dataSource is null
-            ? _cloningInstantiator!(_connectionString)
+            ? _cloningInstantiator!(_originalConnectionString)
             : _dataSource.CreateConnection();
 
         conn.ProvideClientCertificatesCallback = ProvideClientCertificatesCallback;
@@ -1876,7 +1874,7 @@ public sealed class NpgsqlConnection : DbConnection, ICloneable, IComponent
     /// immediately closed, and any busy connections which were opened before <see cref="ClearPool"/> was called
     /// will be closed when returned to the pool.
     /// </summary>
-    public static void ClearPool(NpgsqlConnection connection) => PoolManager.Clear(connection._connectionString);
+    public static void ClearPool(NpgsqlConnection connection) => PoolManager.Clear(connection._poolConnectionString);
 
     /// <summary>
     /// Clear all connection pools. All idle physical connections in all pools are immediately closed, and any busy

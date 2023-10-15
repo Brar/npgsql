@@ -6,6 +6,7 @@ using System.ComponentModel;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.InteropServices;
 using Npgsql.Internal;
 using Npgsql.Netstandard20;
 using Npgsql.Replication;
@@ -1579,7 +1580,21 @@ public sealed partial class NpgsqlConnectionStringBuilder : DbConnectionStringBu
     internal void PostProcessAndValidate()
     {
         if (string.IsNullOrWhiteSpace(Host))
-            throw new ArgumentException("Host can't be null");
+            Host = PostgresEnvironment.Host
+                   ?? (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                           ? "localhost"
+                           // The default socket location on unix is complicated
+                           // https://www.postgresql.org/message-id/21044.1326496507%40sss.pgh.pa.us
+#if NETSTANDARD
+                           : "/tmp"
+#else
+                           : RuntimeInformation.RuntimeIdentifier switch
+                           {
+                               { } c when c.StartsWith("ubuntu", StringComparison.Ordinal) => "/var/run/postgresql",
+                               _ => "/tmp"
+                           }
+#endif
+                   );
         if (Multiplexing && !Pooling)
             throw new ArgumentException("Pooling must be on to use multiplexing");
 

@@ -656,6 +656,41 @@ public class ConnectionTests : MultiplexingTestBase
         Assert.That(() => conn.Open(), Throws.Exception.TypeOf<InvalidOperationException>());
     }
 
+    [Test, NonParallelizable]
+    public async Task Missing_Host_PgHost()
+    {
+        const string pgHost = "127.0.0.1";
+        using (SetEnvironmentVariable("PGHOST", pgHost))
+        {
+            await using var conn = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(ConnectionString) { Host = null}.ConnectionString);
+            await conn.OpenAsync();
+            Assert.That(conn.Settings.Host, Is.EqualTo(pgHost));
+        }
+    }
+
+    [Test, NonParallelizable]
+    public async Task Missing_Host_Default()
+    {
+        using (SetEnvironmentVariable("PGHOST", null))
+        {
+            await using var conn =
+                new NpgsqlConnection(new NpgsqlConnectionStringBuilder(ConnectionString) { Host = null }.ConnectionString);
+            await conn.OpenAsync();
+#if NETCOREAPP3_1
+            Assert.That(conn.Settings.Host, Is.EqualTo(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "localhost" : "/tmp"));
+#else
+            Assert.That(conn.Settings.Host, Is.EqualTo(
+                RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                    ? "localhost"
+                    : RuntimeInformation.RuntimeIdentifier switch
+                    {
+                        { } c when c.StartsWith("ubuntu", StringComparison.Ordinal) => "/var/run/postgresql",
+                        _ => "/tmp"
+                    }));
+#endif
+        }
+    }
+
     [Test, IssueLink("https://github.com/npgsql/npgsql/issues/703")]
     public async Task No_database_defaults_to_username()
     {
