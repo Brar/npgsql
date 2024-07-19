@@ -54,19 +54,15 @@ public sealed class PhysicalReplicationConnection : ReplicationConnection
         string slotName, bool isTemporary = false, bool reserveWal = false, CancellationToken cancellationToken = default)
     {
         CheckDisposed();
-
-        var builder = new StringBuilder("CREATE_REPLICATION_SLOT ").Append(slotName);
-        if (isTemporary)
-            builder.Append(" TEMPORARY");
-        builder.Append(" PHYSICAL");
-        if (reserveWal)
-            builder.Append(PostgreSqlVersion.Major >= 15 ? " (RESERVE_WAL)" : " RESERVE_WAL");
-
-        var command = builder.ToString();
-
-        LogMessages.CreatingReplicationSlot(ReplicationLogger, slotName, command, Connector.Id);
-
-        var slotOptions = await CreateReplicationSlot(builder.ToString(), cancellationToken).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(slotName);
+        cancellationToken.ThrowIfCancellationRequested();
+        var createOptions = new CreatePhysicalReplicationSlotOptions
+        {
+            SlotName = slotName,
+            Temporary = isTemporary,
+            ReserveWal = reserveWal
+        };
+        var slotOptions = await CreateReplicationSlot(createOptions, cancellationToken).ConfigureAwait(false);
 
         return new PhysicalReplicationSlot(slotOptions.SlotName);
     }

@@ -25,9 +25,7 @@ public abstract class ReplicationConnection : IAsyncDisposable
 {
     #region Fields
 
-    static readonly Version FirstVersionWithTwoPhaseSupport = new(15, 0);
     static readonly Version FirstVersionWithoutDropSlotDoubleCommandCompleteMessage = new(13, 0);
-    static readonly Version FirstVersionWithTemporarySlotsAndSlotSnapshotInitMode = new(10, 0);
     readonly NpgsqlConnection _npgsqlConnection;
     readonly SemaphoreSlim _feedbackSemaphore = new(1, 1);
     string? _userFacingConnectionString;
@@ -41,6 +39,8 @@ public abstract class ReplicationConnection : IAsyncDisposable
     CancellationTokenSource? _replicationCancellationTokenSource;
     bool _pgCancellationSupported;
     bool _isDisposed;
+    bool _inTransaction;
+
 
     // We represent the log sequence numbers as unsigned long
     // although we have a special struct to represent them and
@@ -349,41 +349,18 @@ public abstract class ReplicationConnection : IAsyncDisposable
         return new TimelineHistoryFile((string)result[0], (byte[])result[1]);
     }
 
-    internal async Task<ReplicationSlotOptions> CreateReplicationSlot(string command, CancellationToken cancellationToken = default)
+    internal async Task<ReplicationSlotOptions> CreateReplicationSlot(CreateReplicationSlotOptions createOptions, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var result = await ReadSingleRow(command, cancellationToken).ConfigureAwait(false);
-            var slotName = (string)result[0];
-            var consistentPoint = (string)result[1];
-            var snapshotName = (string?)result[2];
-            return new ReplicationSlotOptions(slotName, NpgsqlLogSequenceNumber.Parse(consistentPoint), snapshotName);
-        }
-        catch (PostgresException e) when (!Connector.IsBroken && e.SqlState == PostgresErrorCodes.SyntaxError)
-        {
-            if (PostgreSqlVersion < FirstVersionWithTwoPhaseSupport && command.Contains(" TWO_PHASE"))
-                throw new NotSupportedException("Logical replication support for prepared transactions was introduced in PostgreSQL " +
-                                                FirstVersionWithTwoPhaseSupport.ToString(1) +
-                                                ". Using PostgreSQL version " +
-                                                (PostgreSqlVersion.Build == -1
-                                                    ? PostgreSqlVersion.ToString(2)
-                                                    : PostgreSqlVersion.ToString(3)) +
-                                                " you have to set the twoPhase argument to false.", e);
-            if (PostgreSqlVersion < FirstVersionWithTemporarySlotsAndSlotSnapshotInitMode)
-            {
-                if (command.Contains(" TEMPORARY"))
-                    throw new NotSupportedException("Temporary replication slots were introduced in PostgreSQL " +
-                                                    $"{FirstVersionWithTemporarySlotsAndSlotSnapshotInitMode.ToString(1)}. " +
-                                                    $"Using PostgreSQL version {PostgreSqlVersion.ToString(3)} you " +
-                                                    $"have to set the isTemporary argument to false.", e);
-                if (command.Contains(" EXPORT_SNAPSHOT") || command.Contains(" NOEXPORT_SNAPSHOT") || command.Contains(" USE_SNAPSHOT"))
-                    throw new NotSupportedException(
-                        "The EXPORT_SNAPSHOT, USE_SNAPSHOT and NOEXPORT_SNAPSHOT syntax was introduced in PostgreSQL " +
-                        $"{FirstVersionWithTemporarySlotsAndSlotSnapshotInitMode.ToString(1)}. Using PostgreSQL version " +
-                        $"{PostgreSqlVersion.ToString(3)} you have to omit the slotSnapshotInitMode argument.", e);
-            }
-            throw;
-        }
+        var command = createOptions.ValidateAndCreateCommand(PostgreSqlVersion);
+        if (createOptions is CreateLogicalReplicationSlotOptions { SnapshotInitMode: LogicalSlotSnapshotInitMode.Use })
+            await StartTransaction(cancellationToken).ConfigureAwait(false);
+
+        LogMessages.CreatingReplicationSlot(ReplicationLogger, createOptions.SlotName, command, Connector.Id);
+        var result = await ReadSingleRow(command, cancellationToken).ConfigureAwait(false);
+        var slotName = (string)result[0];
+        var consistentPoint = (string)result[1];
+        var snapshotName = (string?)result[2];
+        return new ReplicationSlotOptions(slotName, NpgsqlLogSequenceNumber.Parse(consistentPoint), snapshotName);
     }
 
     internal async Task<PhysicalReplicationSlot?> ReadReplicationSlotInternal(string slotName, CancellationToken cancellationToken = default)
@@ -437,6 +414,16 @@ public abstract class ReplicationConnection : IAsyncDisposable
 
         try
         {
+            if (_inTransaction)
+            {
+                var cmd = "COMMIT";
+                LogMessages.ExecutingReplicationCommand(ReplicationLogger, cmd, Connector.Id);
+                await connector.WriteQuery(cmd, true, cancellationToken).ConfigureAwait(false);
+                await connector.Flush(true, cancellationToken).ConfigureAwait(false);
+                Expect<CommandCompleteMessage>(await Connector.ReadMessage(true).ConfigureAwait(false), Connector);
+                Expect<ReadyForQueryMessage>(await Connector.ReadMessage(true).ConfigureAwait(false), Connector);
+                _inTransaction = false;
+            }
             await connector.WriteQuery(command, true, cancellationToken).ConfigureAwait(false);
             await connector.Flush(true, cancellationToken).ConfigureAwait(false);
 
@@ -890,6 +877,19 @@ public abstract class ReplicationConnection : IAsyncDisposable
                 return result.ToArray();
             }
         }
+    }
+
+    internal async Task StartTransaction(CancellationToken cancellationToken)
+    {
+        CheckDisposed();
+        var command = "START TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY";
+        using var _ = Connector.StartUserAction(cancellationToken, attemptPgCancellation: _pgCancellationSupported);
+        LogMessages.ExecutingReplicationCommand(ReplicationLogger, command, Connector.Id);
+        await Connector.WriteQuery(command, true, cancellationToken).ConfigureAwait(false);
+        await Connector.Flush(true, cancellationToken).ConfigureAwait(false);
+        Expect<CommandCompleteMessage>(await Connector.ReadMessage(true).ConfigureAwait(false), Connector);
+        Expect<ReadyForQueryMessage>(await Connector.ReadMessage(true).ConfigureAwait(false), Connector);
+        _inTransaction = true;
     }
 
     void SetTimeouts(TimeSpan readTimeout, TimeSpan writeTimeout)
