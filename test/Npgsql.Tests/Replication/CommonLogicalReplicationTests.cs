@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Data;
+using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Npgsql.Replication;
@@ -170,8 +171,8 @@ public class CommonLogicalReplicationTests : SafeReplicationTestBase<LogicalRepl
                         "USE_SNAPSHOT currently doesn't work and always leads to an exception. On the other hand, starting" +
                         "a transaction would only be useful if we'd also provide an API to issue commands.")]
     public Task CreateLogicalReplicationSlot_Use([Values]bool temporary, [Values]bool twoPhase)
-        => SafeReplicationTest(
-            async (slotName, _) =>
+                => SafeReplicationTest(
+            async (slotName, tableName) =>
             {
                 await using var c = await OpenConnectionAsync();
                 if (temporary)
@@ -180,19 +181,36 @@ public class CommonLogicalReplicationTests : SafeReplicationTestBase<LogicalRepl
                     TestUtil.MinimumPgVersion(c, "15.0", "Replication slots with two phase commit support were introduced in PostgreSQL 15");
 
                 TestUtil.MinimumPgVersion(c, "10.0", "The *_SNAPSHOT syntax was introduced in PostgreSQL 10");
-                Assert.That(async () =>
+                await using (var transaction = c.BeginTransaction())
                 {
-                    await using var rc = await OpenReplicationConnectionAsync();
-                    await rc.CreateLogicalReplicationSlot(slotName, OutputPlugin, temporary, LogicalSlotSnapshotInitMode.Use, twoPhase);
-                }, Throws.InstanceOf<PostgresException>()
-                    .With.Property("SqlState")
-                    .EqualTo("XX000")
-                    .And.Message.Contains(
-                        c.PostgreSqlVersion.Major < 15
-                            ? "USE_SNAPSHOT"
-                            : "(SNAPSHOT 'use')"
-                        ));
-            }, nameof(CreateLogicalReplicationSlot_Use) + (temporary ? "_tmp" : "") + (twoPhase ? "_tp" : ""));
+                    await c.ExecuteNonQueryAsync($"CREATE TABLE {tableName} (value text)");
+                    await c.ExecuteNonQueryAsync($"INSERT INTO {tableName} (value) VALUES('Before snapshot')");
+                    transaction.Commit();
+                }
+                await using var rc = await OpenReplicationConnectionAsync();
+                var options = await rc.CreateLogicalReplicationSlot(slotName, OutputPlugin, temporary, LogicalSlotSnapshotInitMode.Use, twoPhase);
+                await using (var transaction = c.BeginTransaction())
+                {
+                    await c.ExecuteNonQueryAsync($"INSERT INTO {tableName} (value) VALUES('After snapshot')");
+                    transaction.Commit();
+                }
+
+                await using var exporter = rc.BeginBinaryExport($"COPY {tableName} TO STDOUT (FORMAT BINARY)");
+                await foreach (var row in exporter)
+                {
+                }
+                //Assert.That(await exporter.StartRowAsync(), Is.EqualTo(1));
+                // ToDo: read data via replication connection.
+                // await using (var transaction = c.BeginTransaction(IsolationLevel.RepeatableRead))
+                // {
+                //     await c.ExecuteScalarAsync($"SET TRANSACTION SNAPSHOT '{options.SnapshotName}';", transaction);
+                //     using var cmd = new NpgsqlCommand($"SELECT value FROM {tableName}", c, transaction);
+                //     await using var reader = await cmd.ExecuteReaderAsync();
+                //     Assert.That(reader.Read, Is.True);
+                //     Assert.That(reader.GetFieldValue<string>(0), Is.EqualTo("Before snapshot"));
+                //     Assert.That(reader.Read, Is.False);
+                // }
+            }, nameof(CreateLogicalReplicationSlot_Export) + (temporary ? "_tmp" : "") + (twoPhase ? "_tp" : ""));
 
     [Test]
     public void CreateLogicalReplicationSlot_with_null_slot_throws()
@@ -244,7 +262,7 @@ public class CommonLogicalReplicationTests : SafeReplicationTestBase<LogicalRepl
                     await rc.CreateLogicalReplicationSlot(slotName, OutputPlugin, slotSnapshotInitMode: (LogicalSlotSnapshotInitMode)42);
                 }, Throws.InstanceOf<ArgumentOutOfRangeException>()
                     .With.Property("ParamName")
-                    .EqualTo("slotSnapshotInitMode")
+                    .EqualTo("SnapshotInitMode")
                     .And.Property("ActualValue")
                     .EqualTo((LogicalSlotSnapshotInitMode)42));
                 return Task.CompletedTask;

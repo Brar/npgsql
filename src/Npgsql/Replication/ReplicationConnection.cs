@@ -37,7 +37,7 @@ public abstract class ReplicationConnection : IAsyncDisposable
 
     IAsyncEnumerator<XLogDataMessage>? _currentEnumerator;
     CancellationTokenSource? _replicationCancellationTokenSource;
-    bool _pgCancellationSupported;
+    private protected bool PgCancellationSupported;
     bool _isDisposed;
     bool _inTransaction;
 
@@ -237,7 +237,7 @@ public abstract class ReplicationConnection : IAsyncDisposable
         await _npgsqlConnection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // PG versions before 10 ignore cancellations during replication
-        _pgCancellationSupported = _npgsqlConnection.PostgreSqlVersion.IsGreaterOrEqual(10);
+        PgCancellationSupported = _npgsqlConnection.PostgreSqlVersion.IsGreaterOrEqual(10);
 
         SetTimeouts(CommandTimeout, CommandTimeout);
 
@@ -408,7 +408,7 @@ public abstract class ReplicationConnection : IAsyncDisposable
         _replicationCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         using var _ = connector.StartUserAction(
-            ConnectorState.Replication, _replicationCancellationTokenSource.Token, attemptPgCancellation: _pgCancellationSupported);
+            ConnectorState.Replication, _replicationCancellationTokenSource.Token, attemptPgCancellation: PgCancellationSupported);
 
         NpgsqlReadBuffer.ColumnStream? columnStream = null;
 
@@ -710,7 +710,7 @@ public abstract class ReplicationConnection : IAsyncDisposable
 
         async Task DropReplicationSlotInternal(string slotName, bool wait, CancellationToken cancellationToken)
         {
-            using var _ = Connector.StartUserAction(cancellationToken, attemptPgCancellation: _pgCancellationSupported);
+            using var _ = Connector.StartUserAction(cancellationToken, attemptPgCancellation: PgCancellationSupported);
 
             var command = "DROP_REPLICATION_SLOT " + slotName;
             if (wait)
@@ -737,7 +737,7 @@ public abstract class ReplicationConnection : IAsyncDisposable
     {
         CheckDisposed();
 
-        using var _ = Connector.StartUserAction(cancellationToken, attemptPgCancellation: _pgCancellationSupported);
+        using var _ = Connector.StartUserAction(cancellationToken, attemptPgCancellation: PgCancellationSupported);
 
         LogMessages.ExecutingReplicationCommand(ReplicationLogger, command, Connector.Id);
 
@@ -883,7 +883,7 @@ public abstract class ReplicationConnection : IAsyncDisposable
     {
         CheckDisposed();
         var command = "START TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY";
-        using var _ = Connector.StartUserAction(cancellationToken, attemptPgCancellation: _pgCancellationSupported);
+        using var _ = Connector.StartUserAction(cancellationToken, attemptPgCancellation: PgCancellationSupported);
         LogMessages.ExecutingReplicationCommand(ReplicationLogger, command, Connector.Id);
         await Connector.WriteQuery(command, true, cancellationToken).ConfigureAwait(false);
         await Connector.Flush(true, cancellationToken).ConfigureAwait(false);

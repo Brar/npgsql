@@ -8,6 +8,13 @@ Npgsql.NpgsqlSlimDataSourceBuilder.EnableJsonTypes() -> Npgsql.NpgsqlSlimDataSou
 Npgsql.NpgsqlSlimDataSourceBuilder.EnableNetworkTypes() -> Npgsql.NpgsqlSlimDataSourceBuilder!
 Npgsql.NpgsqlSlimDataSourceBuilder.UseNegotiateOptionsCallback(System.Action<System.Net.Security.NegotiateAuthenticationClientOptions!>? negotiateOptionsCallback) -> Npgsql.NpgsqlSlimDataSourceBuilder!
 Npgsql.NpgsqlSlimDataSourceBuilder.UseSslClientAuthenticationOptionsCallback(System.Action<System.Net.Security.SslClientAuthenticationOptions!>? sslClientAuthenticationOptionsCallback) -> Npgsql.NpgsqlSlimDataSourceBuilder!
+Npgsql.Replication.LogicalReplicationConnection.BeginBinaryExport(string! copyToCommand, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> Npgsql.Replication.NpgsqlLogicalReplicationExporter!
+Npgsql.Replication.NpgsqlLogicalReplicationExporter
+Npgsql.Replication.NpgsqlLogicalReplicationExporter.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Npgsql.Replication.NpgsqlLogicalReplicationExporter.GetAsyncEnumerator(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerator<Npgsql.Replication.NpgsqlLogicalReplicationExportRow>!
+Npgsql.Replication.NpgsqlLogicalReplicationExporter.NpgsqlLogicalReplicationExporter(Npgsql.Internal.NpgsqlConnector! connector) -> void
+Npgsql.Replication.NpgsqlLogicalReplicationExportRow
+Npgsql.Replication.NpgsqlLogicalReplicationExportRow.NpgsqlLogicalReplicationExportRow() -> void
 Npgsql.Replication.PgOutput.ReplicationValue.GetFieldName() -> string!
 Npgsql.Replication.PgOutput.Messages.ParallelStreamAbortMessage
 Npgsql.Replication.PgOutput.Messages.ParallelStreamAbortMessage.AbortLsn.get -> NpgsqlTypes.NpgsqlLogSequenceNumber
