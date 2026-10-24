@@ -485,6 +485,8 @@ public class CommonReplicationTests<TConnection> : SafeReplicationTestBase<TConn
         => SafeReplicationTest(
             async (slotName, _) =>
             {
+                await using (var c = await OpenConnectionAsync())
+                    TestUtil.MinimumPgVersion(c, "10.0", "Before PostgreSQL 10 the stream's cancellation breaks the connection");
                 await using var rc = await OpenReplicationConnectionAsync();
                 var info = await rc.IdentifySystem();
                 await CreateReplicationSlot(slotName);
