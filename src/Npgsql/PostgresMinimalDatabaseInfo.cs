@@ -12,9 +12,14 @@ sealed class PostgresMinimalDatabaseInfoFactory : INpgsqlDatabaseInfoFactory
 {
     public Task<NpgsqlDatabaseInfo?> Load(NpgsqlConnector conn, NpgsqlTimeout timeout, bool async, CancellationToken cancellationToken)
         => Task.FromResult(
-            !conn.DataSource.Configuration.TypeLoading.LoadTypes
+            !conn.DataSource.Configuration.TypeLoading.LoadTypes || IsLogicalReplicationBefore10(conn)
                 ? (NpgsqlDatabaseInfo)new PostgresMinimalDatabaseInfo(conn)
                 : null);
+
+    // Walsenders before PostgreSQL 10 accept only replication commands, so logical replication connections can't load types there
+    static bool IsLogicalReplicationBefore10(NpgsqlConnector conn)
+        => conn.Settings.ReplicationMode is ReplicationMode.Logical &&
+           !new PostgresMinimalDatabaseInfo(conn).Version.IsGreaterOrEqual(10);
 }
 
 sealed class PostgresMinimalDatabaseInfo : PostgresDatabaseInfo
